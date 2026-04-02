@@ -234,6 +234,10 @@ addBtn.addEventListener("click", async () => {
   addBtn.disabled = true;
 
   try {
+    // Register pending domain so background can add it via onAdded
+    // if the popup closes during the permission dialog (Chrome MV3).
+    await sendMessage({ type: "pendingDomain", domain });
+
     let granted = false;
     try {
       granted = await updateOriginsPermission("request", getOriginPatterns(domain));

@@ -6,6 +6,7 @@ import * as whitelist from "./whitelist.js";
 
 let initialized = false;
 let initPromise = null;
+let pendingDomain = null;
 const popupHandlers = {
   getStatus: () => connection.getStatus(),
   popupOpened: async () => {
@@ -16,9 +17,19 @@ const popupHandlers = {
     await ensureReady();
     return { domains: whitelist.getAllowedDomains() };
   },
+  pendingDomain: ({ domain }) => {
+    pendingDomain = domain;
+    return { ok: true };
+  },
   confirmDomain: async ({ domain }) => {
     await ensureReady();
-    return whitelist.addDomain(domain);
+    pendingDomain = null;
+    const result = await whitelist.addDomain(domain);
+    // Domain may already exist if onAdded handler added it first
+    if (!result.ok && result.error === "Domain already allowed") {
+      return { ok: true };
+    }
+    return result;
   },
   removeDomain: async ({ domain, skipPermissionRevoke }) => {
     await ensureReady();
@@ -74,6 +85,18 @@ async function onDaemonMessage(cmd) {
     return { id, ok: false, error: err.message || String(err) };
   }
 }
+
+// --- Permission granted fallback (handles popup-closing during dialog) ---
+chrome.permissions.onAdded.addListener(async (permissions) => {
+  if (!pendingDomain) return;
+  await initialize();
+  const origins = permissions.origins || [];
+  const patterns = whitelist.getOriginPatterns(pendingDomain);
+  if (patterns.some((p) => origins.includes(p))) {
+    await whitelist.addDomain(pendingDomain).catch(() => {});
+    pendingDomain = null;
+  }
+});
 
 // --- Alarm: keep SW alive + reconnect ---
 chrome.alarms.onAlarm.addListener((alarm) => {
