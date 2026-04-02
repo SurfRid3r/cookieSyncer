@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Cookie Sync",
+  "version": "1.0.0",
+  "description": "Syncs browser cookies with a local daemon over WebSocket. User-controlled domain whitelist for security.",
+  "permissions": [
+    "cookies",
+    "storage",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "host_permissions": [
+    "http://localhost:19825/*",
+    "http://127.0.0.1:19825/*"
+  ],
+  "background": {
+    "service_worker": "background/main.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Cookie Sync",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

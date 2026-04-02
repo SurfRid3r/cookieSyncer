@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cookie Sync"
+  short_description: "从浏览器读取 Cookie 的本地辅助 skill"
+  default_prompt: "Use $cookie-sync to fetch browser cookies for a target domain and reuse them in a command or script."
