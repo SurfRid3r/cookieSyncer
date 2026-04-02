@@ -1,76 +1,76 @@
 # Cookie Sync
 
-通过 Chrome 扩展 + 本地守护进程，在命令行中获取浏览器指定域名的 Cookie。
+[中文文档](docs/zh-cn.md)
 
-## 架构
+Retrieve browser cookies from the command line via a Chrome extension + local daemon.
+
+## Architecture
 
 ```
-Chrome 扩展  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
-   │                                                  │
-   ├─ 管理域名白名单                                   ├─ CLI 输出
-   ├─ 监听/捕获 Cookie                                ├─ Cookie Header
-   └─ Popup UI                                        └─ JSON 格式
+Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
+   │                                                     │
+   ├─ Domain whitelist management                         ├─ CLI output
+   ├─ Capture cookies                                     ├─ Cookie Header
+   └─ Popup UI                                            └─ JSON format
 ```
 
-## 快速开始
+## Quick Start
 
-### 1. 安装 Chrome 扩展
+### 1. Install Chrome Extension
 
-1. 打开 `chrome://extensions/`，开启开发者模式
-2. 点击「加载已解压的扩展程序」，选择 `cookie-sync-extension/` 目录
-3. 点击扩展图标，将目标域名加入白名单
+1. Open `chrome://extensions/` and enable Developer Mode
+2. Click "Load unpacked" and select the `cookie-sync-extension/` directory
+3. Click the extension icon and add target domains to the whitelist
 
-### 2. 使用 Claude Skill
-
-在 Claude Code 中，通过 cookie-sync skill 直接获取 Cookie：
+### 2. Use with Claude Code
 
 ```bash
-# Cookie Header 格式（适合 curl）
+# Cookie Header format (for curl)
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
 
-# JSON 格式
+# JSON format
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com --json
 
-# 查看白名单
+# List whitelisted domains
 python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
 ```
 
-### 3. 配合 curl 使用
+### 3. Use with curl
 
 ```bash
 curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com)" \
   https://api.example.com/me
 ```
 
-## 目录结构
+## Directory Structure
 
 ```
-├── cookie-sync-extension/   # Chrome 扩展（Manifest V3）
+├── cookie-sync-extension/   # Chrome Extension (Manifest V3)
 │   ├── background/           # Service Worker
-│   │   ├── main.js           # 入口
-│   │   ├── connection.js     # WebSocket 连接管理
-│   │   ├── cookie-ops.js     # Cookie 操作
-│   │   ├── domain-utils.js   # 域名工具
-│   │   └── whitelist.js      # 白名单管理
-│   ├── popup/                # 弹出窗口 UI
-│   ├── icons/                # 扩展图标
+│   │   ├── main.js           # Entry point
+│   │   ├── connection.js     # WebSocket connection
+│   │   ├── cookie-ops.js     # Cookie operations
+│   │   ├── domain-utils.js   # Domain utilities
+│   │   └── whitelist.js      # Whitelist management
+│   ├── popup/                # Popup UI
+│   ├── icons/                # Extension icons
 │   └── manifest.json
 │
 └── skills/cookie-sync/       # Claude Code Skill
-    ├── SKILL.md              # Skill 定义
+    ├── SKILL.md              # Skill definition
     ├── agents/
-    │   └── openai.yaml       # Agent 配置
+    │   └── openai.yaml       # Agent config
     └── scripts/
-        └── cookie_sync_daemon.py  # 守护进程
+        └── cookie_sync_daemon.py  # Daemon script
 ```
 
-## 依赖
+## Dependencies
 
-- Chrome 浏览器
-- Python 3 + `websockets`（`pip install websockets`）
+- Chrome browser
+- Python 3 + `websockets` (`pip install websockets`)
 
-## 安全
+## Security
 
-- 仅读取白名单内域名的 Cookie
-- WebSocket 仅监听 localhost
-- 扩展需要用户手动授予主机权限
+- Only reads cookies for whitelisted domains
+- WebSocket listens on localhost only
+- Extension requires manual host permission grants
