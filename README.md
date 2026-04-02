@@ -10,8 +10,8 @@ Retrieve browser cookies from the command line via a Chrome extension + local da
 Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
    │                                                     │
    ├─ Domain whitelist management                         ├─ CLI output
-   ├─ Capture cookies                                     ├─ Cookie Header
-   └─ Popup UI                                            └─ JSON format
+   ├─ Capture cookies                                     └─ Cookie Header
+   └─ Popup UI
 ```
 
 ## Quick Start
@@ -27,9 +27,6 @@ Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_dae
 ```bash
 # Cookie Header format (for curl)
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
-
-# JSON format
-python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com --json
 
 # List whitelisted domains
 python skills/cookie-sync/scripts/cookie_sync_daemon.py --list

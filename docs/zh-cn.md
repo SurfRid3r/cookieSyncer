@@ -8,8 +8,8 @@
 Chrome 扩展  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
    │                                                  │
    ├─ 管理域名白名单                                   ├─ CLI 输出
-   ├─ 监听/捕获 Cookie                                ├─ Cookie Header
-   └─ Popup UI                                        └─ JSON 格式
+   ├─ 监听/捕获 Cookie                                └─ Cookie Header
+   └─ Popup UI
 ```
 
 ## 快速开始
@@ -27,9 +27,6 @@ Chrome 扩展  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon
 ```bash
 # Cookie Header 格式（适合 curl）
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
-
-# JSON 格式
-python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com --json
 
 # 查看白名单
 python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
