@@ -185,11 +185,18 @@ function handleAlarm(alarm) {
 
 function handleSyncError(err) {
   console.error("[cloud-sync] Scheduled sync failed:", err);
+  const msg = err.message || "";
+  // Stop scheduled sync on auth failures (expired/revoked token or password)
+  if (msg.includes("authentication failed") || msg.includes("401")) {
+    console.warn("[cloud-sync] Auth failure detected, stopping scheduled sync");
+    config.update({ scheduleEnabled: false });
+    setupAlarm();
+  }
   config.addSyncLogEntry({
     time: Date.now(),
     action: config.get().mode,
     status: "error",
-    error: err.message,
+    error: msg,
   });
 }
 

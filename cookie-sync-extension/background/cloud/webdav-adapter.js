@@ -53,7 +53,7 @@ export function createWebdavAdapter(config) {
       if (resp.status === 201 || resp.status === 204 || resp.status === 200) {
         return true;
       }
-      if (resp.status === 401) throw new Error("WebDAV authentication failed");
+      if (resp.status === 401) throw new Error("WebDAV 认证失败，用户名或密码无效或已过期");
       if (resp.status === 404) throw new Error("WebDAV path not found. Check file path and ensure parent directory exists.");
       if (resp.status === 409) throw new Error("WebDAV conflict: parent directory does not exist");
       throw new Error(`WebDAV upload failed: ${resp.status}`);
