@@ -6,7 +6,8 @@
   "permissions": [
     "cookies",
     "storage",
-    "alarms"
+    "alarms",
+    "scripting"
   ],
   "optional_host_permissions": [
     "http://*/*",
@@ -14,7 +15,8 @@
   ],
   "host_permissions": [
     "http://localhost:19825/*",
-    "http://127.0.0.1:19825/*"
+    "http://127.0.0.1:19825/*",
+    "https://api.github.com/*"
   ],
   "background": {
     "service_worker": "background/main.js",
