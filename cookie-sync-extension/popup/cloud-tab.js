@@ -81,6 +81,10 @@ function renderSetupGuide(container) {
             <label>GitHub Token</label>
             <input type="password" id="gistToken" placeholder="ghp_xxxxx（需要 gist 权限）">
           </div>
+          <div class="form-group">
+            <label>Gist ID（可选，留空则自动创建）</label>
+            <input type="text" id="gistId" placeholder="首次使用留空，其他设备填入已有 Gist ID">
+          </div>
         </div>
         <div id="webdav-config" style="display:none">
           <div class="form-group">
@@ -125,6 +129,8 @@ function renderCloudUI(container, status) {
       </div>
       <div class="cloud-card-subtitle">后端: ${status.storageType === 'gist' ? 'GitHub Gist' : 'WebDAV'}</div>
       <div class="cloud-card-subtitle">上次同步: ${lastSyncText}</div>
+      ${status.storageType === 'gist' && status.gistId ? `<div class="cloud-card-subtitle" style="margin-top:4px;">Gist ID: <span style="font-family:monospace;font-size:10px;user-select:all;cursor:pointer;" title="点击选中并复制到其他设备">${status.gistId}</span></div>` : ''}
+      ${status.storageType === 'gist' && status.gistId ? '<div class="cloud-card-subtitle" style="color:#007aff;">在其他设备填入相同 Token 和此 Gist ID 即可同步</div>' : ''}
     </div>
     <div class="cloud-card">
       <div class="cloud-card-title" style="margin-bottom:6px">同步模式</div>
@@ -243,7 +249,7 @@ function bindSetupEvents(container) {
       const type = storageTypeSelect.value;
       let config = {};
       if (type === "gist") {
-        config = { token: document.getElementById("gistToken").value };
+        config = { token: document.getElementById("gistToken").value, gistId: document.getElementById("gistId")?.value?.trim() || "" };
       } else {
         config = {
           url: document.getElementById("webdavUrl").value,
@@ -267,7 +273,7 @@ function bindSetupEvents(container) {
     const type = storageTypeSelect.value;
     let config = {};
     if (type === "gist") {
-      config = { token: document.getElementById("gistToken").value };
+      config = { token: document.getElementById("gistToken").value, gistId: document.getElementById("gistId")?.value?.trim() || "" };
       if (!config.token) { msg.innerHTML = '<div class="cloud-msg error">请输入 GitHub Token</div>'; return; }
     } else {
       config = {

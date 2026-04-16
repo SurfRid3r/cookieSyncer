@@ -27,6 +27,7 @@ export function getStatus() {
     mode: cfg.mode,
     configured: config.isConfigured(),
     storageType: cfg.storageType,
+    gistId: cfg.storageConfig?.gist?.gistId || "",
     scheduleEnabled: cfg.scheduleEnabled,
     scheduleInterval: cfg.scheduleIntervalMinutes,
     lastSyncTime: cfg.lastSyncTime,
