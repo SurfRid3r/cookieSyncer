@@ -3,6 +3,7 @@
 import * as connection from "./connection.js";
 import * as cookieOps from "./cookie-ops.js";
 import * as whitelist from "./whitelist.js";
+import * as cloudSync from "./cloud/sync-engine.js";
 
 let initialized = false;
 let initPromise = null;
@@ -39,6 +40,52 @@ const popupHandlers = {
     console.log("[cookie-sync] removeDomain completed:", result);
     return result;
   },
+
+  // Cloud sync handlers
+  cloudGetStatus: async () => {
+    return cloudSync.getStatus();
+  },
+  cloudPush: async () => {
+    return await cloudSync.push();
+  },
+  cloudPull: async () => {
+    return await cloudSync.pull();
+  },
+  cloudSync: async () => {
+    return await cloudSync.sync();
+  },
+  cloudTestConnection: async () => {
+    const ok = await cloudSync.testConnection();
+    return { ok };
+  },
+  cloudGenerateKey: async () => {
+    const exported = await cloudSync.generateAndStoreKey();
+    return { ok: true, key: exported };
+  },
+  cloudImportKey: async ({ key }) => {
+    const exported = await cloudSync.importAndStoreKey(key);
+    return { ok: true, key: exported };
+  },
+  cloudDeriveKey: async ({ password }) => {
+    const exported = await cloudSync.deriveAndStoreKey(password);
+    return { ok: true, key: exported };
+  },
+  cloudExportKey: async () => {
+    const cfg = (await import("./cloud/config.js")).get();
+    return { ok: true, key: cfg.keyConfig.exportedKey };
+  },
+  cloudUpdateSettings: async ({ settings }) => {
+    await cloudSync.updateSettings(settings);
+    return { ok: true };
+  },
+  cloudUpdateStorage: async ({ type, config }) => {
+    await cloudSync.updateStorage(type, config);
+    return { ok: true };
+  },
+  cloudGetSyncLog: async () => {
+    const cfg = (await import("./cloud/config.js")).get();
+    return { log: cfg.syncLog || [] };
+  },
 };
 
 async function initialize() {
@@ -48,6 +95,7 @@ async function initialize() {
   initPromise = (async () => {
     await whitelist.init();
     connection.init(onDaemonMessage);
+    await cloudSync.init();
     chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
     console.log("[cookie-sync] Extension initialized");
     initialized = true;
