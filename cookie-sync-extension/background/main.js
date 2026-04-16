@@ -78,8 +78,11 @@ const popupHandlers = {
     await cloudSync.updateSettings(settings);
     return { ok: true };
   },
-  cloudUpdateStorage: async ({ type, config }) => {
-    await cloudSync.updateStorage(type, config);
+  cloudUpdateStorage: async (msg) => {
+    const storageType = msg?.config?.type;
+    const storageConfig = msg?.config?.config;
+    if (!storageType) return { ok: false, error: "Missing storage type" };
+    await cloudSync.updateStorage(storageType, storageConfig);
     return { ok: true };
   },
   cloudGetSyncLog: async () => {
