@@ -1,7 +1,22 @@
-// popup.js — Popup logic: connection status + domain whitelist with grouping & pagination
+// popup.js — Popup logic: tab switching, domain management, cloud sync
 
 import { normalizeDomain, getOriginPatterns, getRootDomain } from "../background/domain-utils.js";
+import { initCloudTab } from "./cloud-tab.js";
 
+// --- Tab switching ---
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
+    if (btn.dataset.tab === "cloud") {
+      initCloudTab();
+    }
+  });
+});
+
+// --- Domain Management ---
 const PAGE_SIZE = 5;
 
 const dot = document.getElementById("dot");
@@ -69,33 +84,20 @@ function updateOriginsPermission(method, origins) {
 notifyPopupOpened();
 refreshDomains();
 
-// --- Connection status ---
 function refreshStatus() {
   sendMessage({ type: "getStatus" })
-    .then((resp) => {
-      setConnectionStatus(resp);
-      syncStatusPolling(resp);
-    })
-    .catch(() => {
-      stopStatusPolling();
-      setStatus("disconnected");
-    });
+    .then((resp) => { setConnectionStatus(resp); syncStatusPolling(resp); })
+    .catch(() => { stopStatusPolling(); setStatus("disconnected"); });
 }
 
 function notifyPopupOpened() {
   sendMessage({ type: "popupOpened" })
-    .then((resp) => {
-      setConnectionStatus(resp);
-      syncStatusPolling(resp);
-    })
+    .then((resp) => { setConnectionStatus(resp); syncStatusPolling(resp); })
     .catch(() => refreshStatus());
 }
 
 function syncStatusPolling(resp) {
-  if (resp?.connected || !resp?.reconnecting) {
-    stopStatusPolling();
-    return;
-  }
+  if (resp?.connected || !resp?.reconnecting) { stopStatusPolling(); return; }
   if (statusPollTimer !== null) return;
   statusPollTimer = window.setInterval(() => refreshStatus(), 1000);
 }
@@ -106,14 +108,9 @@ function stopStatusPolling() {
   statusPollTimer = null;
 }
 
-// --- Domain list ---
 function refreshDomains() {
   sendMessage({ type: "getDomains" })
-    .then((resp) => {
-      allDomains = resp?.domains || [];
-      buildGroups();
-      render();
-    })
+    .then((resp) => { allDomains = resp?.domains || []; buildGroups(); render(); })
     .catch(() => {});
 }
 
@@ -125,39 +122,31 @@ function buildGroups() {
     group.push(d);
     map.set(root, group);
   }
-
   groupedData = [...map.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([root, domains]) => ({ root, domains: domains.sort() }));
 }
 
-function render() {
-  renderDomainList();
-  renderPagination();
-}
+function render() { renderDomainList(); renderPagination(); }
 
 function renderDomainList() {
   if (groupedData.length === 0) {
     domainList.innerHTML = '<div class="domain-empty">No domains allowed yet. Add one above.</div>';
     return;
   }
-
   const totalPages = Math.max(1, Math.ceil(groupedData.length / PAGE_SIZE));
   if (currentPage > totalPages) currentPage = 1;
-
   const start = (currentPage - 1) * PAGE_SIZE;
   const pageGroups = groupedData.slice(start, start + PAGE_SIZE);
 
   domainList.innerHTML = pageGroups.map((group, groupIdx) => {
     const isExpanded = expandedGroups.has(group.root);
-
     const childrenHtml = group.domains.map((d, domainIdx) => `
       <div class="subdomain-item">
         <span>${escapeHtml(d)}</span>
         <button data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}">Remove</button>
       </div>
     `).join("");
-
     return `
       <div class="domain-group">
         <div class="group-header" data-group-root="${groupIdx}">
@@ -165,9 +154,7 @@ function renderDomainList() {
           <span class="group-name">${escapeHtml(group.root)}</span>
           <span class="group-count">${group.domains.length}</span>
         </div>
-        <div class="group-children ${isExpanded ? 'expanded' : ''}">
-          ${childrenHtml}
-        </div>
+        <div class="group-children ${isExpanded ? 'expanded' : ''}">${childrenHtml}</div>
       </div>`;
   }).join("");
 
@@ -181,7 +168,6 @@ function renderDomainList() {
       render();
     });
   });
-
   domainList.querySelectorAll("button[data-domain-idx]").forEach((btn) => {
     btn.addEventListener("click", (e) => handleRemoveDomain(e, btn, pageGroups));
   });
@@ -189,85 +175,39 @@ function renderDomainList() {
 
 function renderPagination() {
   const totalPages = Math.max(1, Math.ceil(groupedData.length / PAGE_SIZE));
-  if (totalPages <= 1) {
-    pagination.innerHTML = "";
-    return;
-  }
-
+  if (totalPages <= 1) { pagination.innerHTML = ""; return; }
   pagination.innerHTML = `
     <button id="prevPage" ${currentPage <= 1 ? "disabled" : ""}>Prev</button>
     <span class="page-info">${currentPage} / ${totalPages}</span>
     <button id="nextPage" ${currentPage >= totalPages ? "disabled" : ""}>Next</button>
   `;
-
-  document.getElementById("prevPage").addEventListener("click", () => {
-    if (currentPage > 1) { currentPage--; render(); }
-  });
-  document.getElementById("nextPage").addEventListener("click", () => {
-    if (currentPage < totalPages) { currentPage++; render(); }
-  });
+  document.getElementById("prevPage").addEventListener("click", () => { if (currentPage > 1) { currentPage--; render(); } });
+  document.getElementById("nextPage").addEventListener("click", () => { if (currentPage < totalPages) { currentPage++; render(); } });
 }
 
-// --- Add domain ---
 addBtn.addEventListener("click", async () => {
   if (isAddingDomain) return;
-
   const raw = domainInput.value.trim();
   const domain = normalizeDomain(raw);
-
   domainError.textContent = "";
-
-  if (!domain) {
-    domainError.textContent = "Please enter a valid domain";
-    return;
-  }
-  if (!domain.includes(".")) {
-    domainError.textContent = "Domain must contain a dot (e.g. example.com)";
-    return;
-  }
-  if (allDomains.includes(domain)) {
-    domainError.textContent = "Domain already allowed";
-    return;
-  }
-
+  if (!domain) { domainError.textContent = "Please enter a valid domain"; return; }
+  if (!domain.includes(".")) { domainError.textContent = "Domain must contain a dot"; return; }
+  if (allDomains.includes(domain)) { domainError.textContent = "Domain already allowed"; return; }
   isAddingDomain = true;
   addBtn.disabled = true;
-
   try {
-    // Register pending domain so background can add it via onAdded
-    // if the popup closes during the permission dialog (Chrome MV3).
     await sendMessage({ type: "pendingDomain", domain });
-
     let granted = false;
-    try {
-      granted = await updateOriginsPermission("request", getOriginPatterns(domain));
-    } catch (err) {
-      domainError.textContent = err.message;
-    }
-
-    if (!granted) {
-      if (!domainError.textContent) domainError.textContent = "Permission denied by user";
-      return;
-    }
-
+    try { granted = await updateOriginsPermission("request", getOriginPatterns(domain)); }
+    catch (err) { domainError.textContent = err.message; }
+    if (!granted) { if (!domainError.textContent) domainError.textContent = "Permission denied"; return; }
     const resp = await sendMessage({ type: "confirmDomain", domain });
-    if (resp?.ok) {
-      domainInput.value = "";
-      domainError.textContent = "";
-      expandedGroups.add(getRootDomain(domain));
-      refreshDomains();
-    } else {
-      domainError.textContent = resp?.error || "Failed to add domain";
-    }
-  } finally {
-    isAddingDomain = false;
-    addBtn.disabled = false;
-  }
+    if (resp?.ok) { domainInput.value = ""; domainError.textContent = ""; expandedGroups.add(getRootDomain(domain)); refreshDomains(); }
+    else { domainError.textContent = resp?.error || "Failed to add domain"; }
+  } finally { isAddingDomain = false; addBtn.disabled = false; }
 });
 
-domainInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") addBtn.click();
-});
+domainInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addBtn.click(); });
 
 async function handleRemoveDomain(event, button, pageGroups) {
   event.stopPropagation();
@@ -275,34 +215,16 @@ async function handleRemoveDomain(event, button, pageGroups) {
   const domainIdx = parseInt(button.dataset.domainIdx, 10);
   const domain = pageGroups[groupIdx]?.domains[domainIdx];
   if (!domain) return;
-
   button.disabled = true;
   domainError.textContent = "";
-
   try {
     let removed = false;
-    try {
-      removed = await updateOriginsPermission("remove", getOriginPatterns(domain));
-    } catch (err) {
-      domainError.textContent = err.message;
-      return;
-    }
-
-    if (!removed) {
-      domainError.textContent = "Chrome did not revoke the site permission";
-      return;
-    }
-
+    try { removed = await updateOriginsPermission("remove", getOriginPatterns(domain)); }
+    catch (err) { domainError.textContent = err.message; return; }
+    if (!removed) { domainError.textContent = "Chrome did not revoke the permission"; return; }
     const resp = await sendMessage({ type: "removeDomain", domain, skipPermissionRevoke: true });
-    if (resp?.ok) {
-      refreshDomains();
-      domainError.textContent = "Domain removed from whitelist. Chrome's extension details page may still show saved site access entries.";
-      return;
-    }
-
+    if (resp?.ok) { refreshDomains(); domainError.textContent = "Domain removed."; return; }
     domainError.textContent = "";
-    alert("Failed to remove domain: " + (resp?.error || "Unknown error"));
-  } finally {
-    button.disabled = false;
-  }
+    alert("Failed to remove: " + (resp?.error || "Unknown error"));
+  } finally { button.disabled = false; }
 }

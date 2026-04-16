@@ -1,0 +1,57 @@
+/* cloud-tab.css */
+.cloud-card { background: #f5f5f5; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.cloud-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.cloud-card-title { font-size: 13px; font-weight: 600; color: #333; }
+.cloud-card-subtitle { font-size: 11px; color: #999; }
+.cloud-status-badge { font-size: 11px; }
+.cloud-status-badge.connected { color: #34c759; }
+.cloud-status-badge.disconnected { color: #ff3b30; }
+.mode-selector { display: flex; gap: 4px; margin-bottom: 8px; }
+.mode-btn { flex: 1; padding: 6px 4px; border: 1px solid #ddd; border-radius: 6px; background: #fff; font-size: 11px; color: #666; cursor: pointer; text-align: center; }
+.mode-btn.active { background: #007aff; color: #fff; border-color: #007aff; font-weight: 600; }
+.mode-btn:hover:not(.active) { background: #f0f0f0; }
+.schedule-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.schedule-row label { font-size: 12px; color: #555; }
+.schedule-row input[type="number"] { width: 50px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; text-align: center; outline: none; }
+.schedule-row input[type="number"]:focus { border-color: #007aff; }
+.schedule-row span { font-size: 11px; color: #999; }
+.toggle-switch { position: relative; width: 36px; height: 20px; background: #ddd; border-radius: 10px; cursor: pointer; flex-shrink: 0; }
+.toggle-switch.on { background: #34c759; }
+.toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.toggle-switch.on::after { transform: translateX(16px); }
+.action-buttons { display: flex; gap: 8px; margin-bottom: 10px; }
+.action-btn { flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; }
+.action-btn.primary { background: #007aff; color: #fff; }
+.action-btn.primary:hover { background: #0066d6; }
+.action-btn.secondary { background: #f5f5f5; color: #333; border: 1px solid #ddd; }
+.action-btn.secondary:hover { background: #eee; }
+.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.section-toggle { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #f5f5f5; border-radius: 8px; margin-bottom: 6px; cursor: pointer; user-select: none; }
+.section-toggle:hover { background: #eee; }
+.section-toggle-title { font-size: 12px; font-weight: 600; color: #333; }
+.section-toggle-info { font-size: 11px; color: #999; }
+.section-body { display: none; padding: 10px 12px; background: #fafafa; border-radius: 0 0 8px 8px; margin-top: -6px; margin-bottom: 6px; }
+.section-body.open { display: block; }
+.form-group { margin-bottom: 8px; }
+.form-group label { display: block; font-size: 11px; color: #666; margin-bottom: 3px; }
+.form-group input, .form-group select { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; outline: none; }
+.form-group input:focus, .form-group select:focus { border-color: #007aff; }
+.btn-sm { padding: 5px 10px; border: none; border-radius: 5px; font-size: 11px; cursor: pointer; font-weight: 500; }
+.btn-sm.primary { background: #007aff; color: #fff; }
+.btn-sm.primary:hover { background: #0066d6; }
+.btn-sm.outline { background: none; border: 1px solid #007aff; color: #007aff; }
+.btn-sm.outline:hover { background: #f0f7ff; }
+.btn-row { display: flex; gap: 6px; margin-top: 6px; }
+.cloud-msg { font-size: 11px; padding: 6px 8px; border-radius: 4px; margin-top: 4px; }
+.cloud-msg.info { color: #007aff; background: #f0f7ff; }
+.cloud-msg.error { color: #ff3b30; background: #fff0f0; }
+.cloud-msg.success { color: #34c759; background: #f0fff0; }
+.log-entry { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #eee; font-size: 11px; }
+.log-entry:last-child { border-bottom: none; }
+.log-time { color: #999; }
+.log-action { color: #555; font-weight: 500; }
+.log-status { font-size: 10px; }
+.log-status.success { color: #34c759; }
+.log-status.error { color: #ff3b30; }
+.setup-guide { text-align: center; padding: 20px 0; }
+.setup-guide p { font-size: 12px; color: #666; margin-bottom: 8px; }
