@@ -15,6 +15,7 @@ export async function generateKey() {
 
 export async function importFromPassword(password, salt) {
   const encoder = new TextEncoder();
+  const saltBytes = salt || crypto.getRandomValues(new Uint8Array(16));
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     encoder.encode(password),
@@ -25,7 +26,7 @@ export async function importFromPassword(password, salt) {
   return await crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: salt || encoder.encode("cookie-sync-salt"),
+      salt: saltBytes,
       iterations: PBKDF2_ITERATIONS,
       hash: "SHA-256",
     },
@@ -42,7 +43,13 @@ export async function exportKey(key) {
 }
 
 export async function importKey(base64Str) {
+  if (!base64Str || typeof base64Str !== "string") {
+    throw new Error("Invalid key: expected base64 string");
+  }
   const raw = base64ToArrayBuffer(base64Str);
+  if (raw.byteLength !== 32) {
+    throw new Error(`Invalid key: expected 32 bytes, got ${raw.byteLength}`);
+  }
   return await crypto.subtle.importKey(
     "raw",
     raw,

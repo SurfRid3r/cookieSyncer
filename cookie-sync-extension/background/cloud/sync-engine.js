@@ -167,11 +167,11 @@ function setupAlarm() {
   chrome.alarms.clear(ALARM_NAME);
 
   const cfg = config.get();
-  if (!cfg.scheduleEnabled || !cfg.enabled) return;
+  if (!cfg.scheduleEnabled) return;
 
   const interval = Math.max(MIN_INTERVAL, cfg.scheduleIntervalMinutes);
-  chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
   chrome.alarms.onAlarm.addListener(handleAlarm);
+  chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
 }
 
 function handleAlarm(alarm) {
