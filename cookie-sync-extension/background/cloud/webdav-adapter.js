@@ -32,6 +32,7 @@ export function createWebdavAdapter(config) {
           Authorization: getAuthHeader(),
           Depth: "0",
         },
+        signal: AbortSignal.timeout(10000),
       });
       return resp.status === 207 || resp.status === 200;
     } catch {
@@ -49,6 +50,7 @@ export function createWebdavAdapter(config) {
           "Content-Type": "application/octet-stream",
         },
         body: encryptedPayload,
+        signal: AbortSignal.timeout(15000),
       });
       if (resp.status === 201 || resp.status === 204 || resp.status === 200) {
         return true;
@@ -71,6 +73,7 @@ export function createWebdavAdapter(config) {
         headers: {
           Authorization: getAuthHeader(),
         },
+        signal: AbortSignal.timeout(15000),
       });
       if (resp.status === 404) return null;
       if (!resp.ok) throw new Error(`WebDAV download failed: ${resp.status}`);

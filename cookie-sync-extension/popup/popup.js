@@ -83,6 +83,7 @@ function updateOriginsPermission(method, origins) {
 // --- Init ---
 notifyPopupOpened();
 refreshDomains();
+document.addEventListener("domains-changed", () => refreshDomains());
 
 function refreshStatus() {
   sendMessage({ type: "getStatus" })

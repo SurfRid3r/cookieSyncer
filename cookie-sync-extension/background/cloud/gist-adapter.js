@@ -15,7 +15,7 @@ export function createGistAdapter(config) {
       "Content-Type": "application/json",
       ...options.headers,
     };
-    const resp = await fetch(url, { ...options, headers });
+    const resp = await fetch(url, { ...options, headers, signal: options.signal || AbortSignal.timeout(15000) });
     if (resp.status === 401) throw new Error("GitHub Token 无效或已过期，请重新配置");
     if (resp.status === 403 || resp.status === 429) {
       const remaining = resp.headers.get("X-RateLimit-Remaining");

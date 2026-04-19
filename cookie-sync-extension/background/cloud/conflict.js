@@ -72,20 +72,11 @@ export function resolve(localData, remoteData, lastKnown) {
     }
   }
 
-  // Merge localStorage: remote overwrites local, local-only keys preserved
-  const mergedStorages = { ...(localData?.localStorages || {}) };
-  if (remoteData?.localStorages) {
-    for (const [origin, data] of Object.entries(remoteData.localStorages)) {
-      mergedStorages[origin] = { ...(mergedStorages[origin] || {}), ...data };
-    }
-  }
-
   return {
     merged: {
       version: 1,
       timestamp: now,
       cookies: mergedCookies,
-      localStorages: mergedStorages,
     },
     stats,
   };

@@ -1,12 +1,14 @@
-// background/cloud/data-collector.js — Collect cookies and localStorage by whitelist
+// background/cloud/data-collector.js — Collect cookies by whitelist
 
 import * as whitelist from "../whitelist.js";
 
 export async function collectAll(lastKnown) {
   const domains = whitelist.getAllowedDomains();
   if (domains.length === 0) {
-    return { cookies: {}, localStorages: {}, timestamp: Date.now(), domainCount: 0, cookieCount: 0 };
+    console.log("[cloud-sync] collectAll: no domains in whitelist");
+    return { cookies: {}, timestamp: Date.now(), domainCount: 0, cookieCount: 0 };
   }
+  console.log("[cloud-sync] collectAll: collecting for", domains.length, "domains:", domains.join(", "));
 
   const now = Date.now();
   const cookiesByDomain = {};
@@ -28,69 +30,52 @@ export async function collectAll(lastKnown) {
         lastModified: lastKnown?.[cookieKey(c)] || now,
       }));
       totalCookies += filtered.length;
+      console.log("[cloud-sync] collectAll:", domain, "->", filtered.length, "cookies");
     } catch (err) {
-      console.warn(`[cloud-sync] Failed to collect cookies for ${domain}:`, err);
+      console.warn("[cloud-sync] collectAll: failed for", domain, ":", err.message);
     }
   }
-
-  const localStorages = await collectLocalStorages(domains);
 
   return {
     version: 1,
     timestamp: now,
     cookies: cookiesByDomain,
-    localStorages,
     domainCount: domains.length,
     cookieCount: totalCookies,
   };
 }
 
-async function collectLocalStorages(domains) {
-  const storages = {};
-  const tabs = await chrome.tabs.query({});
-
-  for (const domain of domains) {
-    const matchingTabs = tabs.filter((tab) => {
-      try {
-        const hostname = new URL(tab.url).hostname;
-        return hostname === domain || hostname.endsWith(`.${domain}`);
-      } catch {
-        return false;
-      }
-    });
-
-    for (const tab of matchingTabs) {
-      try {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            const data = {};
-            for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i);
-              data[key] = localStorage.getItem(key);
-            }
-            return data;
-          },
-        });
-        if (results?.[0]?.result && Object.keys(results[0].result).length > 0) {
-          const origin = new URL(tab.url).origin;
-          if (!storages[origin]) storages[origin] = {};
-          Object.assign(storages[origin], results[0].result);
-        }
-      } catch (err) {
-        // Tab may not be accessible (chrome://, about:, etc.)
-      }
-    }
-  }
-
-  return storages;
-}
-
 export async function writeCookies(cookiesByDomain) {
   let written = 0;
   let deleted = 0;
+  const skippedDomains = new Set();
+
+  // Check permissions per domain, collect missing ones
+  const allDomains = Object.keys(cookiesByDomain);
+  const grantedOrigins = (await chrome.permissions.getAll()).origins || [];
+  const domainsWithPermission = new Set();
+  console.log("[cloud-sync] writeCookies:", allDomains.length, "domains to write, granted origins:", grantedOrigins.length);
+
+  for (const domain of allDomains) {
+    const host = domain.replace(/^\./, "");
+    const hasPermission = grantedOrigins.some((origin) => {
+      const o = origin.replace(/^[a-z]+:\/\//, "").split("/")[0].replace(/^\*\./, "");
+      return o === host || host.endsWith(`.${o}`) || o.endsWith(`.${host}`);
+    });
+    if (hasPermission) {
+      domainsWithPermission.add(domain);
+    } else {
+      skippedDomains.add(host);
+      console.warn("[cloud-sync] writeCookies: no permission for", host, "(" + cookiesByDomain[domain].length, "cookies skipped)");
+    }
+  }
+
+  if (skippedDomains.size > 0) {
+    console.log("[cloud-sync] writeCookies: skipped domains:", [...skippedDomains].join(", "));
+  }
 
   for (const [domain, cookies] of Object.entries(cookiesByDomain)) {
+    if (!domainsWithPermission.has(domain)) continue;
     for (const c of cookies) {
       try {
         const url = `http${c.secure ? "s" : ""}://${c.domain.replace(/^\./, "")}${c.path}`;
@@ -117,42 +102,7 @@ export async function writeCookies(cookiesByDomain) {
     }
   }
 
-  return { written, deleted };
-}
-
-export async function writeLocalStorages(localStorages) {
-  let written = 0;
-  const tabs = await chrome.tabs.query({});
-
-  for (const [origin, data] of Object.entries(localStorages)) {
-    const url = new URL(origin);
-    const matchingTabs = tabs.filter((tab) => {
-      try {
-        return new URL(tab.url).origin === origin;
-      } catch {
-        return false;
-      }
-    });
-
-    for (const tab of matchingTabs) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: (items) => {
-            for (const [key, value] of Object.entries(items)) {
-              localStorage.setItem(key, value);
-            }
-          },
-          args: [data],
-        });
-        written += Object.keys(data).length;
-      } catch {
-        // Tab not accessible
-      }
-    }
-  }
-
-  return { written };
+  return { written, deleted, skippedDomains: [...skippedDomains] };
 }
 
 function cookieKey(c) {

@@ -1,5 +1,7 @@
 // cloud-tab.js — Cloud sync tab UI logic
 
+import { getOriginPatterns } from "../background/domain-utils.js";
+
 let cloudInitialized = false;
 let activeSection = null;
 
@@ -23,17 +25,26 @@ export async function initCloudTab() {
   const status = await sendMessage({ type: "cloudGetStatus" });
 
   if (!status.configured) {
-    renderSetupGuide(container);
+    renderSetupGuide(container, !!status.hasKey);
   } else {
     renderCloudUI(container, status);
   }
 }
 
-function renderSetupGuide(container) {
-  container.innerHTML = `
-    <div class="setup-guide">
-      <p>请先配置加密密钥和存储后端以启用云同步。</p>
-      <div class="section-toggle" data-section="key-setup">
+function renderSetupGuide(container, hasKey) {
+  const keySection = hasKey
+    ? `<div class="section-toggle" data-section="key-setup">
+        <span class="section-toggle-title">🔑 加密密钥</span>
+        <span class="section-toggle-info" style="color:#34c759;">✓ 已配置 ›</span>
+      </div>
+      <div class="section-body" id="section-key-setup">
+        <div class="btn-row">
+          <button class="btn-sm outline" id="exportKeyBtn">导出密钥</button>
+          <button class="btn-sm outline" id="reconfigKeyBtn">重新配置</button>
+        </div>
+        <div id="keyMsg"></div>
+      </div>`
+    : `<div class="section-toggle" data-section="key-setup">
         <span class="section-toggle-title">🔑 配置加密密钥</span>
         <span class="section-toggle-info">必填 ›</span>
       </div>
@@ -62,8 +73,12 @@ function renderSetupGuide(container) {
           <button class="btn-sm primary" id="generateKeyBtn">生成密钥</button>
         </div>
         <div id="keyMsg"></div>
-      </div>
+      </div>`;
 
+  container.innerHTML = `
+    <div class="setup-guide">
+      <p>请先配置加密密钥和存储后端以启用云同步。</p>
+      ${keySection}
       <div class="section-toggle" data-section="storage-setup" style="margin-top:6px">
         <span class="section-toggle-title">⚙️ 配置存储后端</span>
         <span class="section-toggle-info">必填 ›</span>
@@ -147,6 +162,7 @@ function renderCloudUI(container, status) {
       </div>
     </div>
     <div class="action-buttons" id="actionButtons"></div>
+    <div id="syncMsg"></div>
     <div class="section-toggle" data-section="key">
       <span class="section-toggle-title">🔑 加密密钥</span>
       <span class="section-toggle-info">已配置 ›</span>
@@ -154,6 +170,7 @@ function renderCloudUI(container, status) {
     <div class="section-body" id="section-key">
       <div class="btn-row">
         <button class="btn-sm outline" id="exportKeyBtn">导出密钥</button>
+        <button class="btn-sm outline" id="reconfigKeyBtn">重新配置</button>
       </div>
       <div id="keyManageMsg"></div>
     </div>
@@ -185,54 +202,117 @@ function renderActionButtons(mode) {
 }
 
 function bindSetupEvents(container) {
+  // Export key button (when key already configured)
+  document.getElementById("exportKeyBtn")?.addEventListener("click", async () => {
+    const msg = document.getElementById("keyMsg");
+    try {
+      const resp = await sendMessage({ type: "cloudExportKey" });
+      if (resp?.ok && resp.key) {
+        msg.innerHTML = `<div class="cloud-msg info" style="word-break:break-all;"><strong>密钥（请安全保存）：</strong><br><input style="width:100%;font-family:monospace;font-size:10px;padding:4px;margin-top:4px;" value="${resp.key}" readonly onclick="this.select()"></div>`;
+      }
+    } catch (err) { msg.innerHTML = `<div class="cloud-msg error">${err.message}</div>`; }
+  });
+
+  // Reconfig key button: replace with full key setup form
+  document.getElementById("reconfigKeyBtn")?.addEventListener("click", () => {
+    const toggle = container.querySelector('[data-section="key-setup"]');
+    const body = document.getElementById("section-key-setup");
+    if (!toggle || !body) return;
+    toggle.querySelector(".section-toggle-title").textContent = "🔑 配置加密密钥";
+    toggle.querySelector(".section-toggle-info").textContent = "收起 ▾";
+    toggle.querySelector(".section-toggle-info").style.color = "";
+    body.innerHTML = `
+      <div class="form-group">
+        <label>选择密钥方式</label>
+        <select id="keyType">
+          <option value="random">自动生成（推荐）</option>
+          <option value="password">从密码派生</option>
+          <option value="import">导入已有密钥</option>
+        </select>
+      </div>
+      <div id="key-password-input" style="display:none">
+        <div class="form-group">
+          <label>输入密码</label>
+          <input type="password" id="keyPassword" placeholder="输入密码">
+        </div>
+      </div>
+      <div id="key-import-input" style="display:none">
+        <div class="form-group">
+          <label>粘贴 Base64 密钥</label>
+          <input type="text" id="keyImport" placeholder="粘贴导出的密钥字符串">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-sm primary" id="generateKeyBtn">生成密钥</button>
+      </div>
+      <div id="keyMsg"></div>`;
+    if (!body.classList.contains("open")) body.classList.add("open");
+    bindKeyFormEvents();
+  });
+
+  function bindKeyFormEvents() {
+    const keyTypeSelect = document.getElementById("keyType");
+    keyTypeSelect.addEventListener("change", () => {
+      document.getElementById("key-password-input").style.display =
+        keyTypeSelect.value === "password" ? "block" : "none";
+      document.getElementById("key-import-input").style.display =
+        keyTypeSelect.value === "import" ? "block" : "none";
+      document.getElementById("generateKeyBtn").textContent =
+        keyTypeSelect.value === "random" ? "生成密钥" :
+        keyTypeSelect.value === "password" ? "派生密钥" : "导入密钥";
+    });
+
+    document.getElementById("generateKeyBtn").addEventListener("click", async () => {
+      const msg = document.getElementById("keyMsg");
+      const type = keyTypeSelect.value;
+      try {
+        let resp;
+        if (type === "random") {
+          resp = await sendMessage({ type: "cloudGenerateKey" });
+        } else if (type === "password") {
+          const password = document.getElementById("keyPassword").value;
+          if (!password) { msg.innerHTML = '<div class="cloud-msg error">请输入密码</div>'; return; }
+          resp = await sendMessage({ type: "cloudDeriveKey", password });
+        } else {
+          const key = document.getElementById("keyImport").value.trim();
+          if (!key) { msg.innerHTML = '<div class="cloud-msg error">请粘贴密钥</div>'; return; }
+          resp = await sendMessage({ type: "cloudImportKey", key });
+        }
+        if (resp?.ok) {
+          msg.innerHTML = '<div class="cloud-msg success">密钥已更新！请安全保存导出的密钥以便在其他设备导入。</div>';
+          const toggle = container.querySelector('[data-section="key-setup"]');
+          if (toggle) {
+            toggle.querySelector(".section-toggle-title").textContent = "🔑 加密密钥";
+            const info = toggle.querySelector(".section-toggle-info");
+            info.textContent = "✓ 已配置 ›";
+            info.style.color = "#34c759";
+          }
+        } else {
+          msg.innerHTML = `<div class="cloud-msg error">${resp?.error || "密钥配置失败"}</div>`;
+        }
+      } catch (err) {
+        msg.innerHTML = `<div class="cloud-msg error">${err.message}</div>`;
+      }
+    });
+  }
+
   container.querySelectorAll(".section-toggle").forEach((el) => {
     el.addEventListener("click", () => {
       const sectionId = `section-${el.dataset.section}`;
       const body = document.getElementById(sectionId);
       if (body) {
         body.classList.toggle("open");
-        el.querySelector(".section-toggle-info").textContent =
-          body.classList.contains("open") ? "收起 ▾" : "必填 ›";
+        const info = el.querySelector(".section-toggle-info");
+        if (el.dataset.section === "key-setup" && info.textContent.includes("已配置")) {
+          info.textContent = body.classList.contains("open") ? "收起 ▾" : "✓ 已配置 ›";
+        } else {
+          info.textContent = body.classList.contains("open") ? "收起 ▾" : "必填 ›";
+        }
       }
     });
   });
 
-  const keyTypeSelect = document.getElementById("keyType");
-  keyTypeSelect.addEventListener("change", () => {
-    document.getElementById("key-password-input").style.display =
-      keyTypeSelect.value === "password" ? "block" : "none";
-    document.getElementById("key-import-input").style.display =
-      keyTypeSelect.value === "import" ? "block" : "none";
-    document.getElementById("generateKeyBtn").textContent =
-      keyTypeSelect.value === "random" ? "生成密钥" :
-      keyTypeSelect.value === "password" ? "派生密钥" : "导入密钥";
-  });
-
-  document.getElementById("generateKeyBtn").addEventListener("click", async () => {
-    const msg = document.getElementById("keyMsg");
-    const type = keyTypeSelect.value;
-    try {
-      let resp;
-      if (type === "random") {
-        resp = await sendMessage({ type: "cloudGenerateKey" });
-      } else if (type === "password") {
-        const password = document.getElementById("keyPassword").value;
-        if (!password) { msg.innerHTML = '<div class="cloud-msg error">请输入密码</div>'; return; }
-        resp = await sendMessage({ type: "cloudDeriveKey", password });
-      } else {
-        const key = document.getElementById("keyImport").value.trim();
-        if (!key) { msg.innerHTML = '<div class="cloud-msg error">请粘贴密钥</div>'; return; }
-        resp = await sendMessage({ type: "cloudImportKey", key });
-      }
-      if (resp?.ok) {
-        msg.innerHTML = '<div class="cloud-msg success">密钥已配置！请安全保存导出的密钥以便在其他设备导入。</div>';
-      } else {
-        msg.innerHTML = `<div class="cloud-msg error">${resp?.error || "密钥配置失败"}</div>`;
-      }
-    } catch (err) {
-      msg.innerHTML = `<div class="cloud-msg error">${err.message}</div>`;
-    }
-  });
+  if (document.getElementById("keyType")) bindKeyFormEvents();
 
   const storageTypeSelect = document.getElementById("storageType");
   storageTypeSelect.addEventListener("change", () => {
@@ -354,8 +434,81 @@ function bindCloudEvents(container, status) {
       const resp = await sendMessage({ type: "cloudExportKey" });
       if (resp?.ok && resp.key) {
         msg.innerHTML = `<div class="cloud-msg info" style="word-break:break-all;"><strong>密钥（请安全保存）：</strong><br><input style="width:100%;font-family:monospace;font-size:10px;padding:4px;margin-top:4px;" value="${resp.key}" readonly onclick="this.select()"></div>`;
+      } else {
+        msg.innerHTML = `<div class="cloud-msg error">${resp?.error || "密钥未找到"}</div>`;
       }
     } catch (err) { msg.innerHTML = `<div class="cloud-msg error">${err.message}</div>`; }
+  });
+
+  document.getElementById("reconfigKeyBtn")?.addEventListener("click", () => {
+    const body = document.getElementById("section-key");
+    if (!body) return;
+    body.innerHTML = `
+      <div class="form-group">
+        <label>选择密钥方式</label>
+        <select id="keyType">
+          <option value="random">自动生成（推荐）</option>
+          <option value="password">从密码派生</option>
+          <option value="import">导入已有密钥</option>
+        </select>
+      </div>
+      <div id="key-password-input" style="display:none">
+        <div class="form-group">
+          <label>输入密码</label>
+          <input type="password" id="keyPassword" placeholder="输入密码">
+        </div>
+      </div>
+      <div id="key-import-input" style="display:none">
+        <div class="form-group">
+          <label>粘贴 Base64 密钥</label>
+          <input type="text" id="keyImport" placeholder="粘贴导出的密钥字符串">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-sm primary" id="generateKeyBtn">生成密钥</button>
+      </div>
+      <div id="keyManageMsg"></div>`;
+    if (!body.classList.contains("open")) body.classList.add("open");
+    bindCloudKeyFormEvents(container);
+  });
+}
+
+function bindCloudKeyFormEvents(container) {
+  const keyTypeSelect = document.getElementById("keyType");
+  keyTypeSelect.addEventListener("change", () => {
+    document.getElementById("key-password-input").style.display =
+      keyTypeSelect.value === "password" ? "block" : "none";
+    document.getElementById("key-import-input").style.display =
+      keyTypeSelect.value === "import" ? "block" : "none";
+    document.getElementById("generateKeyBtn").textContent =
+      keyTypeSelect.value === "random" ? "生成密钥" :
+      keyTypeSelect.value === "password" ? "派生密钥" : "导入密钥";
+  });
+
+  document.getElementById("generateKeyBtn").addEventListener("click", async () => {
+    const msg = document.getElementById("keyManageMsg");
+    const type = keyTypeSelect.value;
+    try {
+      let resp;
+      if (type === "random") {
+        resp = await sendMessage({ type: "cloudGenerateKey" });
+      } else if (type === "password") {
+        const password = document.getElementById("keyPassword").value;
+        if (!password) { msg.innerHTML = '<div class="cloud-msg error">请输入密码</div>'; return; }
+        resp = await sendMessage({ type: "cloudDeriveKey", password });
+      } else {
+        const key = document.getElementById("keyImport").value.trim();
+        if (!key) { msg.innerHTML = '<div class="cloud-msg error">请粘贴密钥</div>'; return; }
+        resp = await sendMessage({ type: "cloudImportKey", key });
+      }
+      if (resp?.ok) {
+        msg.innerHTML = '<div class="cloud-msg success">密钥已更新！请安全保存导出的密钥以便在其他设备导入。</div>';
+      } else {
+        msg.innerHTML = `<div class="cloud-msg error">${resp?.error || "密钥配置失败"}</div>`;
+      }
+    } catch (err) {
+      msg.innerHTML = `<div class="cloud-msg error">${err.message}</div>`;
+    }
   });
 }
 
@@ -369,29 +522,82 @@ async function doSync(type, btnId) {
   const btn = document.getElementById(btnId);
   if (!btn) return;
   const originalText = btn.textContent;
+  const msgArea = document.getElementById("syncMsg");
   btn.disabled = true;
   btn.textContent = "同步中...";
+  if (msgArea) msgArea.innerHTML = "";
+  console.log("[cloud-sync-popup] doSync start:", type);
   try {
-    const resp = await sendMessage({ type });
+    const resp = await Promise.race([
+      sendMessage({ type }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("同步超时（30秒）")), 30000)),
+    ]);
+    console.log("[cloud-sync-popup] doSync response:", JSON.stringify(resp).slice(0, 200));
     if (resp?.success) {
       btn.textContent = "✓ 成功";
-      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); }, 1500);
+      let successMsg = "同步成功";
+      if (resp.domains) successMsg += `，同步 ${resp.domains} 个域名`;
+      if (msgArea) msgArea.innerHTML = `<div class="cloud-msg success">${successMsg}</div>`;
+
+      // Handle skipped domains — request permissions here (user gesture available)
+      if (resp.skippedDomains?.length > 0 && type !== "cloudPush") {
+        await handleSkippedDomains(resp.skippedDomains, msgArea, btn, originalText, type);
+        return;
+      }
+
+      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); }, 2000);
     } else {
       btn.textContent = originalText;
       btn.disabled = false;
-      alert(`同步失败: ${resp?.error || "未知错误"}`);
+      const errMsg = resp?.error || "未知错误";
+      if (msgArea) msgArea.innerHTML = `<div class="cloud-msg error">${errMsg}</div>`;
     }
   } catch (err) {
     btn.textContent = originalText;
     btn.disabled = false;
-    alert(`同步失败: ${err.message}`);
+    if (msgArea) msgArea.innerHTML = `<div class="cloud-msg error">${err.message}</div>`;
   }
+}
+
+async function handleSkippedDomains(domains, msgArea, btn, originalText, syncType) {
+  const allPatterns = domains.flatMap((d) => getOriginPatterns(d));
+  const granted = await new Promise((resolve) => {
+    chrome.permissions.request({ origins: allPatterns }, (result) => {
+      resolve(result !== false);
+    });
+  });
+
+  if (granted) {
+    // Add domains to whitelist
+    await sendMessage({ type: "cloudAddDomains", domains });
+    document.dispatchEvent(new CustomEvent("domains-changed"));
+    // Re-sync to write the previously skipped cookies
+    if (msgArea) msgArea.innerHTML = '<div class="cloud-msg info">已授权新域名，正在重新同步...</div>';
+    btn.textContent = "同步中...";
+    try {
+      const resp2 = await sendMessage({ type: syncType });
+      if (resp2?.success) {
+        let msg = `同步完成，同步 ${resp2.domains || 0} 个域名`;
+        if (msgArea) msgArea.innerHTML = `<div class="cloud-msg success">${msg}</div>`;
+      } else if (msgArea) {
+        msgArea.innerHTML = `<div class="cloud-msg error">${resp2?.error || "重试失败"}</div>`;
+      }
+    } catch (err) {
+      if (msgArea) msgArea.innerHTML = `<div class="cloud-msg error">${err.message}</div>`;
+    }
+  } else {
+    if (msgArea) {
+      msgArea.innerHTML = `<div class="cloud-msg success">同步完成，跳过 ${domains.length} 个未授权域名: ${domains.join(", ")}</div>`;
+    }
+  }
+  setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); }, 2000);
 }
 
 async function loadSyncLog(container) {
   try {
     const resp = await sendMessage({ type: "cloudGetSyncLog" });
     const log = resp?.log || [];
+    console.log("[cloud-sync] loadSyncLog: received", log.length, "entries, resp:", JSON.stringify(resp).slice(0, 200));
     if (log.length === 0) {
       container.innerHTML = '<div style="font-size:11px;color:#999;text-align:center;padding:8px;">暂无同步记录</div>';
       return;

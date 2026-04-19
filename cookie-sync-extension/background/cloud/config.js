@@ -86,6 +86,7 @@ export async function addSyncLogEntry(entry) {
   cached.lastSyncTime = entry.time;
   cached.lastSyncStatus = entry.status;
   cached.lastSyncError = entry.status === "error" ? entry.error : null;
+  console.log("[cloud-sync] addSyncLogEntry:", entry.action, entry.status, "total entries:", cached.syncLog.length);
   await save();
 }
 

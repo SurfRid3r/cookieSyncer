@@ -43,42 +43,76 @@ const popupHandlers = {
 
   // Cloud sync handlers
   cloudGetStatus: async () => {
-    return cloudSync.getStatus();
+    await ensureReady();
+    const status = cloudSync.getStatus();
+    console.log("[cloud-sync] getStatus: configured:", status.configured, "hasKey:", status.hasKey, "storage:", status.storageType);
+    return status;
   },
   cloudPush: async () => {
-    return await cloudSync.push();
+    console.log("[cloud-sync] cloudPush handler");
+    await ensureReady();
+    try {
+      return await cloudSync.push();
+    } catch (err) {
+      console.error("[cloud-sync] cloudPush failed:", err.message);
+      await cloudSync.logError("push", err.message);
+      throw err;
+    }
   },
   cloudPull: async () => {
-    return await cloudSync.pull();
+    console.log("[cloud-sync] cloudPull handler");
+    await ensureReady();
+    try {
+      return await cloudSync.pull();
+    } catch (err) {
+      console.error("[cloud-sync] cloudPull failed:", err.message);
+      await cloudSync.logError("pull", err.message);
+      throw err;
+    }
   },
   cloudSync: async () => {
-    return await cloudSync.sync();
+    console.log("[cloud-sync] cloudSync handler");
+    await ensureReady();
+    try {
+      return await cloudSync.sync();
+    } catch (err) {
+      console.error("[cloud-sync] cloudSync failed:", err.message);
+      await cloudSync.logError("sync", err.message);
+      throw err;
+    }
   },
   cloudTestConnection: async () => {
+    await ensureReady();
     const ok = await cloudSync.testConnection();
     return { ok };
   },
   cloudGenerateKey: async () => {
+    await ensureReady();
     const exported = await cloudSync.generateAndStoreKey();
     return { ok: true, key: exported };
   },
   cloudImportKey: async ({ key }) => {
+    await ensureReady();
     const exported = await cloudSync.importAndStoreKey(key);
     return { ok: true, key: exported };
   },
   cloudDeriveKey: async ({ password }) => {
+    await ensureReady();
     const exported = await cloudSync.deriveAndStoreKey(password);
     return { ok: true, key: exported };
   },
   cloudExportKey: async () => {
-    const cfg = (await import("./cloud/config.js")).get();
-    return { ok: true, key: cfg.keyConfig.exportedKey };
+    await ensureReady();
+    const key = cloudSync.getExportedKey();
+    return { ok: true, key };
   },
   cloudUpdateSettings: async ({ settings }) => {
+    await ensureReady();
     await cloudSync.updateSettings(settings);
     return { ok: true };
   },
   cloudUpdateStorage: async (msg) => {
+    await ensureReady();
     const storageType = msg?.config?.type;
     const storageConfig = msg?.config?.config;
     if (!storageType) return { ok: false, error: "Missing storage type" };
@@ -86,8 +120,22 @@ const popupHandlers = {
     return { ok: true };
   },
   cloudGetSyncLog: async () => {
-    const cfg = (await import("./cloud/config.js")).get();
-    return { log: cfg.syncLog || [] };
+    console.log("[cloud-sync] cloudGetSyncLog handler");
+    await ensureReady();
+    const log = cloudSync.getSyncLog();
+    console.log("[cloud-sync] cloudGetSyncLog returning", log.length, "entries");
+    return { log };
+  },
+  cloudAddDomains: async ({ domains }) => {
+    console.log("[cloud-sync] cloudAddDomains:", domains.join(", "));
+    await ensureReady();
+    const results = [];
+    for (const domain of domains) {
+      const r = await whitelist.addDomain(domain);
+      results.push({ domain, ...r });
+      console.log("[cloud-sync] addDomain", domain, "->", r.ok ? "ok" : r.error);
+    }
+    return { ok: true, results };
   },
 };
 
