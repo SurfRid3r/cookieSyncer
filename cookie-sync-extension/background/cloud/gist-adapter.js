@@ -1,112 +1,105 @@
-// background/cloud/gist-adapter.js — GitHub Gist storage backend
-
-const GITHUB_API = "https://api.github.com";
-const FILENAME = "cookie-sync.enc";
+// background/cloud/gist-adapter.js — GitHub Gist storage
 
 export function createGistAdapter(config) {
-  let token = config.token || "";
-  let gistId = config.gistId || "";
+  let gistId = config.gistId || null;
+  let token = config.token;
+  const filename = "cookie-sync.enc";
 
-  async function apiFetch(path, options = {}) {
-    const url = `${GITHUB_API}${path}`;
+  function apiFetch(path, options = {}) {
     const headers = {
       Authorization: `token ${token}`,
       Accept: "application/vnd.github.v3+json",
       "Content-Type": "application/json",
       ...options.headers,
     };
-    const resp = await fetch(url, { ...options, headers, signal: options.signal || AbortSignal.timeout(15000) });
-    if (resp.status === 401) throw new Error("GitHub Token 无效或已过期，请重新配置");
-    if (resp.status === 403 || resp.status === 429) {
-      const remaining = resp.headers.get("X-RateLimit-Remaining");
-      throw new Error(`GitHub API rate limited. Remaining: ${remaining}`);
-    }
-    return resp;
+    return fetch(`https://api.github.com${path}`, { ...options, headers });
   }
 
-  async function init(configUpdate) {
-    if (configUpdate?.token) token = configUpdate.token;
-    if (configUpdate?.gistId) gistId = configUpdate.gistId;
-  }
+  async function upload(payload, domainList) {
+    const body = {
+      description: "Cookie Sync encrypted data",
+      public: false,
+      files: {
+        [filename]: { content: payload },
+        "domain-list.json": {
+          content: JSON.stringify(domainList || [], null, 2),
+        },
+      },
+    };
 
-  async function testConnection() {
-    try {
-      if (!token) return false;
-      const resp = await apiFetch("/user");
-      return resp.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  async function upload(encryptedPayload) {
-    try {
-      if (!gistId) {
-        const resp = await apiFetch("/gists", {
-          method: "POST",
-          body: JSON.stringify({
-            description: "Cookie Sync encrypted data",
-            public: false,
-            files: { [FILENAME]: { content: encryptedPayload } },
-          }),
-        });
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({}));
-          throw new Error(err.message || `Failed to create gist: ${resp.status}`);
-        }
-        const data = await resp.json();
-        gistId = data.id;
-        return gistId;
-      }
-
-      const resp = await apiFetch(`/gists/${gistId}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          files: { [FILENAME]: { content: encryptedPayload } },
-        }),
-      });
+    if (gistId) {
+      const resp = await apiFetch(`/gists/${gistId}`, { method: "PATCH", body: JSON.stringify(body) });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        throw new Error(err.message || `Failed to update gist: ${resp.status}`);
+        if (err.message?.includes("401")) throw new Error("authentication failed: token invalid or expired");
+        throw new Error(`Gist update failed: ${resp.status} ${err.message || ""}`);
       }
       return true;
-    } catch (err) {
-      console.error("[cloud-sync] Gist upload error:", err);
-      throw err;
     }
+
+    const resp = await apiFetch("/gists", { method: "POST", body: JSON.stringify(body) });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      if (err.message?.includes("401")) throw new Error("authentication failed: token invalid or expired");
+      throw new Error(`Gist create failed: ${resp.status} ${err.message || ""}`);
+    }
+    const data = await resp.json();
+    gistId = data.id;
+    return gistId;
   }
 
   async function download() {
-    try {
-      if (!gistId) return null;
-      const resp = await apiFetch(`/gists/${gistId}`);
+    if (!gistId) return null;
+    const resp = await apiFetch(`/gists/${gistId}`);
+    if (!resp.ok) {
       if (resp.status === 404) return null;
-      if (!resp.ok) throw new Error(`Failed to fetch gist: ${resp.status}`);
+      const err = await resp.json().catch(() => ({}));
+      if (err.message?.includes("401")) throw new Error("authentication failed: token invalid or expired");
+      throw new Error(`Gist download failed: ${resp.status}`);
+    }
+    const data = await resp.json();
+    const file = data.files?.[filename];
+    return file?.content || null;
+  }
+
+  async function downloadDomainList() {
+    if (!gistId) return [];
+    try {
+      const resp = await apiFetch(`/gists/${gistId}`);
+      if (!resp.ok) return [];
       const data = await resp.json();
-      const file = data.files?.[FILENAME];
-      return file?.content || null;
-    } catch (err) {
-      console.error("[cloud-sync] Gist download error:", err);
-      throw err;
+      const file = data.files?.["domain-list.json"];
+      if (!file?.content) return [];
+      return JSON.parse(file.content);
+    } catch {
+      return [];
     }
   }
 
   async function getLastModified() {
-    try {
-      if (!gistId) return null;
-      const resp = await apiFetch(`/gists/${gistId}`);
-      if (!resp.ok) return null;
+    if (!gistId) return null;
+    const resp = await apiFetch(`/gists/${gistId}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.updated_at ? new Date(data.updated_at).getTime() : null;
+  }
+
+  async function testConnection() {
+    const resp = await apiFetch("/gists", { method: "POST", body: JSON.stringify({ public: false, files: { "test": { content: "test" } } }) });
+    if (resp.ok) {
       const data = await resp.json();
-      const dateStr = data.updated_at || data.created_at;
-      return dateStr ? new Date(dateStr).getTime() : null;
-    } catch {
-      return null;
+      await apiFetch(`/gists/${data.id}`, { method: "DELETE" });
+      return true;
     }
+    const err = await resp.json().catch(() => ({}));
+    console.error("[gist] Connection test failed:", err.message);
+    return false;
   }
 
-  function getGistId() {
-    return gistId;
+  function init(cfg) {
+    if (cfg.gistId) gistId = cfg.gistId;
+    if (cfg.token) token = cfg.token;
   }
 
-  return { init, testConnection, upload, download, getLastModified, getGistId };
+  return { init, upload, download, downloadDomainList, getLastModified, testConnection };
 }
