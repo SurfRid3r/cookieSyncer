@@ -136,21 +136,29 @@ function renderDomainList() {
     const isExpanded = expandedGroups.has(group.root);
     const childrenHtml = group.entries.map((entry, domainIdx) => {
       const localClass = entry.localAccess ? "toggle-on" : "toggle-off";
-      const localText = entry.localAccess ? "ON" : "OFF";
-      let cloudHtml = "";
+      const localText = entry.localAccess ? "本地ON" : "本地OFF";
+      let cloudClass = "";
+      let cloudText = "";
+      let cloudAction = "";
       if (entry.cloudSync === "enabled") {
-        cloudHtml = `<span class="badge badge-enabled">同步</span>`;
+        cloudClass = "badge-enabled";
+        cloudText = "云端ON";
+        cloudAction = "disable-cloud";
       } else if (entry.cloudSync === "pending") {
-        cloudHtml = `<span class="badge badge-pending">待确认</span>`;
+        cloudClass = "badge-pending";
+        cloudText = "待确认";
+        cloudAction = "enable-cloud";
       } else {
-        cloudHtml = `<span class="badge badge-disabled">已禁用</span>`;
+        cloudClass = "badge-disabled";
+        cloudText = "云端OFF";
+        cloudAction = "enable-cloud";
       }
       return `
         <div class="subdomain-item" data-domain="${escapeHtml(entry.domain)}">
           <span class="domain-name">${escapeHtml(entry.domain)}</span>
           <div class="domain-controls">
-            <button class="toggle-btn ${localClass}" data-action="local" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="本地获取">${localText}</button>
-            ${cloudHtml}
+            <button class="toggle-btn ${localClass}" data-action="local" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="允许本地 daemon 获取此域名 cookie">${localText}</button>
+            <span class="badge ${cloudClass}" data-action="${cloudAction}" data-domain="${escapeHtml(entry.domain)}" title="点击切换云端同步">${cloudText}</span>
             <button class="remove-btn" data-action="remove" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="删除">x</button>
           </div>
         </div>
@@ -183,13 +191,13 @@ function renderDomainList() {
   domainList.querySelectorAll("button[data-action='remove']").forEach((btn) => {
     btn.addEventListener("click", (e) => handleRemoveDomain(e, btn, pageGroups));
   });
-  domainList.querySelectorAll(".badge-pending").forEach((badge) => {
+  domainList.querySelectorAll(".badge[data-action='enable-cloud']").forEach((badge) => {
     badge.style.cursor = "pointer";
-    badge.addEventListener("click", (e) => handleEnablePending(e, badge));
+    badge.addEventListener("click", () => handleSetCloudSync(badge.dataset.domain, "enabled"));
   });
-  domainList.querySelectorAll(".badge-disabled").forEach((badge) => {
+  domainList.querySelectorAll(".badge[data-action='disable-cloud']").forEach((badge) => {
     badge.style.cursor = "pointer";
-    badge.addEventListener("click", (e) => handleEnablePending(e, badge));
+    badge.addEventListener("click", () => handleSetCloudSync(badge.dataset.domain, "disabled"));
   });
 }
 
@@ -255,10 +263,8 @@ async function handleRemoveDomain(event, button, pageGroups) {
   } finally { button.disabled = false; }
 }
 
-async function handleEnablePending(event, badge) {
-  const item = badge.closest(".subdomain-item");
-  const domain = item?.dataset?.domain;
+async function handleSetCloudSync(domain, status) {
   if (!domain) return;
-  const resp = await sendMessage({ type: "setCloudSync", domain, status: "enabled" });
+  const resp = await sendMessage({ type: "setCloudSync", domain, status });
   if (resp?.ok) refreshDomains();
 }
