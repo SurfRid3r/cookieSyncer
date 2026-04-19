@@ -1,6 +1,6 @@
-// popup.js — Popup logic: tab switching, domain management, cloud sync
+// popup.js — Popup logic: tab switching, unified domain management
 
-import { normalizeDomain, getOriginPatterns, getRootDomain } from "../background/domain-utils.js";
+import { normalizeDomain, getRootDomain } from "../background/domain-utils.js";
 import { initCloudTab } from "./cloud-tab.js";
 
 // --- Tab switching ---
@@ -27,16 +27,16 @@ const domainError = document.getElementById("domainError");
 const domainList = document.getElementById("domainList");
 const pagination = document.getElementById("pagination");
 
-let allDomains = [];
+let allEntries = [];
 let groupedData = [];
 let currentPage = 1;
 let expandedGroups = new Set();
 let isAddingDomain = false;
 let statusPollTimer = null;
 const STATUS_HTML = {
-  connected: "<strong>Connected to daemon</strong>",
-  connecting: "<strong>Reconnecting...</strong>",
-  disconnected: "<strong>No daemon connected</strong>",
+  connected: "<strong>已连接 daemon</strong>",
+  connecting: "<strong>重连中...</strong>",
+  disconnected: "<strong>未连接 daemon</strong>",
 };
 
 function escapeHtml(str) {
@@ -64,18 +64,6 @@ function sendMessage(message) {
         return;
       }
       resolve(resp);
-    });
-  });
-}
-
-function updateOriginsPermission(method, origins) {
-  return new Promise((resolve, reject) => {
-    chrome.permissions[method]({ origins }, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(result !== false);
     });
   });
 }
@@ -111,28 +99,32 @@ function stopStatusPolling() {
 
 function refreshDomains() {
   sendMessage({ type: "getDomains" })
-    .then((resp) => { allDomains = resp?.domains || []; buildGroups(); render(); })
+    .then((resp) => {
+      allEntries = resp?.entries || [];
+      buildGroups();
+      render();
+    })
     .catch(() => {});
 }
 
 function buildGroups() {
   const map = new Map();
-  for (const d of allDomains) {
-    const root = getRootDomain(d);
+  for (const entry of allEntries) {
+    const root = getRootDomain(entry.domain);
     const group = map.get(root) || [];
-    group.push(d);
+    group.push(entry);
     map.set(root, group);
   }
   groupedData = [...map.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([root, domains]) => ({ root, domains: domains.sort() }));
+    .map(([root, entries]) => ({ root, entries: entries.sort((a, b) => a.domain.localeCompare(b.domain)) }));
 }
 
 function render() { renderDomainList(); renderPagination(); }
 
 function renderDomainList() {
   if (groupedData.length === 0) {
-    domainList.innerHTML = '<div class="domain-empty">No domains allowed yet. Add one above.</div>';
+    domainList.innerHTML = '<div class="domain-empty">暂无域名，请添加。</div>';
     return;
   }
   const totalPages = Math.max(1, Math.ceil(groupedData.length / PAGE_SIZE));
@@ -142,18 +134,34 @@ function renderDomainList() {
 
   domainList.innerHTML = pageGroups.map((group, groupIdx) => {
     const isExpanded = expandedGroups.has(group.root);
-    const childrenHtml = group.domains.map((d, domainIdx) => `
-      <div class="subdomain-item">
-        <span>${escapeHtml(d)}</span>
-        <button data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}">Remove</button>
-      </div>
-    `).join("");
+    const childrenHtml = group.entries.map((entry, domainIdx) => {
+      const localClass = entry.localAccess ? "toggle-on" : "toggle-off";
+      const localText = entry.localAccess ? "ON" : "OFF";
+      let cloudHtml = "";
+      if (entry.cloudSync === "enabled") {
+        cloudHtml = `<span class="badge badge-enabled">同步</span>`;
+      } else if (entry.cloudSync === "pending") {
+        cloudHtml = `<span class="badge badge-pending">待确认</span>`;
+      } else {
+        cloudHtml = `<span class="badge badge-disabled">已禁用</span>`;
+      }
+      return `
+        <div class="subdomain-item" data-domain="${escapeHtml(entry.domain)}">
+          <span class="domain-name">${escapeHtml(entry.domain)}</span>
+          <div class="domain-controls">
+            <button class="toggle-btn ${localClass}" data-action="local" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="本地获取">${localText}</button>
+            ${cloudHtml}
+            <button class="remove-btn" data-action="remove" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="删除">x</button>
+          </div>
+        </div>
+      `;
+    }).join("");
     return `
       <div class="domain-group">
         <div class="group-header" data-group-root="${groupIdx}">
           <span class="group-arrow ${isExpanded ? 'expanded' : ''}">&#9654;</span>
           <span class="group-name">${escapeHtml(group.root)}</span>
-          <span class="group-count">${group.domains.length}</span>
+          <span class="group-count">${group.entries.length}</span>
         </div>
         <div class="group-children ${isExpanded ? 'expanded' : ''}">${childrenHtml}</div>
       </div>`;
@@ -169,8 +177,19 @@ function renderDomainList() {
       render();
     });
   });
-  domainList.querySelectorAll("button[data-domain-idx]").forEach((btn) => {
+  domainList.querySelectorAll("button[data-action='local']").forEach((btn) => {
+    btn.addEventListener("click", (e) => handleToggleLocal(e, btn, pageGroups));
+  });
+  domainList.querySelectorAll("button[data-action='remove']").forEach((btn) => {
     btn.addEventListener("click", (e) => handleRemoveDomain(e, btn, pageGroups));
+  });
+  domainList.querySelectorAll(".badge-pending").forEach((badge) => {
+    badge.style.cursor = "pointer";
+    badge.addEventListener("click", (e) => handleEnablePending(e, badge));
+  });
+  domainList.querySelectorAll(".badge-disabled").forEach((badge) => {
+    badge.style.cursor = "pointer";
+    badge.addEventListener("click", (e) => handleEnablePending(e, badge));
   });
 }
 
@@ -178,9 +197,9 @@ function renderPagination() {
   const totalPages = Math.max(1, Math.ceil(groupedData.length / PAGE_SIZE));
   if (totalPages <= 1) { pagination.innerHTML = ""; return; }
   pagination.innerHTML = `
-    <button id="prevPage" ${currentPage <= 1 ? "disabled" : ""}>Prev</button>
+    <button id="prevPage" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
     <span class="page-info">${currentPage} / ${totalPages}</span>
-    <button id="nextPage" ${currentPage >= totalPages ? "disabled" : ""}>Next</button>
+    <button id="nextPage" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
   `;
   document.getElementById("prevPage").addEventListener("click", () => { if (currentPage > 1) { currentPage--; render(); } });
   document.getElementById("nextPage").addEventListener("click", () => { if (currentPage < totalPages) { currentPage++; render(); } });
@@ -191,41 +210,55 @@ addBtn.addEventListener("click", async () => {
   const raw = domainInput.value.trim();
   const domain = normalizeDomain(raw);
   domainError.textContent = "";
-  if (!domain) { domainError.textContent = "Please enter a valid domain"; return; }
-  if (!domain.includes(".")) { domainError.textContent = "Domain must contain a dot"; return; }
-  if (allDomains.includes(domain)) { domainError.textContent = "Domain already allowed"; return; }
+  if (!domain) { domainError.textContent = "请输入有效域名"; return; }
+  if (!domain.includes(".")) { domainError.textContent = "域名必须包含点号"; return; }
+  if (allEntries.some((e) => e.domain === domain)) { domainError.textContent = "域名已存在"; return; }
   isAddingDomain = true;
   addBtn.disabled = true;
   try {
-    await sendMessage({ type: "pendingDomain", domain });
-    let granted = false;
-    try { granted = await updateOriginsPermission("request", getOriginPatterns(domain)); }
-    catch (err) { domainError.textContent = err.message; }
-    if (!granted) { if (!domainError.textContent) domainError.textContent = "Permission denied"; return; }
-    const resp = await sendMessage({ type: "confirmDomain", domain });
-    if (resp?.ok) { domainInput.value = ""; domainError.textContent = ""; expandedGroups.add(getRootDomain(domain)); refreshDomains(); }
-    else { domainError.textContent = resp?.error || "Failed to add domain"; }
+    const resp = await sendMessage({ type: "addDomain", domain });
+    if (resp?.ok) {
+      domainInput.value = "";
+      domainError.textContent = "";
+      expandedGroups.add(getRootDomain(domain));
+      refreshDomains();
+    } else {
+      domainError.textContent = resp?.error || "添加失败";
+    }
   } finally { isAddingDomain = false; addBtn.disabled = false; }
 });
 
 domainInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addBtn.click(); });
 
+async function handleToggleLocal(event, button, pageGroups) {
+  event.stopPropagation();
+  const groupIdx = parseInt(button.dataset.groupIdx, 10);
+  const domainIdx = parseInt(button.dataset.domainIdx, 10);
+  const entry = pageGroups[groupIdx]?.entries[domainIdx];
+  if (!entry) return;
+  const newValue = !entry.localAccess;
+  const resp = await sendMessage({ type: "setLocalAccess", domain: entry.domain, value: newValue });
+  if (resp?.ok) refreshDomains();
+}
+
 async function handleRemoveDomain(event, button, pageGroups) {
   event.stopPropagation();
   const groupIdx = parseInt(button.dataset.groupIdx, 10);
   const domainIdx = parseInt(button.dataset.domainIdx, 10);
-  const domain = pageGroups[groupIdx]?.domains[domainIdx];
-  if (!domain) return;
+  const entry = pageGroups[groupIdx]?.entries[domainIdx];
+  if (!entry) return;
   button.disabled = true;
-  domainError.textContent = "";
   try {
-    let removed = false;
-    try { removed = await updateOriginsPermission("remove", getOriginPatterns(domain)); }
-    catch (err) { domainError.textContent = err.message; return; }
-    if (!removed) { domainError.textContent = "Chrome did not revoke the permission"; return; }
-    const resp = await sendMessage({ type: "removeDomain", domain, skipPermissionRevoke: true });
-    if (resp?.ok) { refreshDomains(); domainError.textContent = "Domain removed."; return; }
-    domainError.textContent = "";
-    alert("Failed to remove: " + (resp?.error || "Unknown error"));
+    const resp = await sendMessage({ type: "removeDomain", domain: entry.domain });
+    if (resp?.ok) { refreshDomains(); }
+    else { alert("删除失败: " + (resp?.error || "未知错误")); }
   } finally { button.disabled = false; }
+}
+
+async function handleEnablePending(event, badge) {
+  const item = badge.closest(".subdomain-item");
+  const domain = item?.dataset?.domain;
+  if (!domain) return;
+  const resp = await sendMessage({ type: "setCloudSync", domain, status: "enabled" });
+  if (resp?.ok) refreshDomains();
 }
