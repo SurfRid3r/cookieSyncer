@@ -1,22 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Cookie Sync",
-  "version": "1.1.0",
-  "description": "Syncs browser cookies with a local daemon over WebSocket. User-controlled domain whitelist for security.",
+  "version": "1.2.0",
+  "description": "Syncs browser cookies with a local daemon over WebSocket and cloud storage. User-controlled domain management for security.",
   "permissions": [
     "cookies",
     "storage",
     "alarms",
     "scripting"
   ],
-  "optional_host_permissions": [
-    "http://*/*",
-    "https://*/*"
-  ],
   "host_permissions": [
-    "http://localhost:19825/*",
-    "http://127.0.0.1:19825/*",
-    "https://api.github.com/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background/main.js",
