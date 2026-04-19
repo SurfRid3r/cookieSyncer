@@ -5,6 +5,7 @@ import * as crypto from "./crypto.js";
 import { createAdapter } from "./storage-adapter.js";
 import * as dataCollector from "./data-collector.js";
 import * as conflict from "./conflict.js";
+import * as whitelist from "../whitelist.js";
 
 const ALARM_NAME = "cloud-sync";
 const MIN_INTERVAL = 5;
@@ -44,10 +45,10 @@ export async function push() {
   if (!adapter) throw new Error("存储后端未配置");
   console.log("[cloud-sync] push start");
   const lastKnown = await loadLastKnown();
-  const data = await dataCollector.collectAll(lastKnown);
+  const data = await dataCollector.collectAll(null, lastKnown);
   console.log("[cloud-sync] push collected:", data.domainCount, "domains,", data.cookieCount, "cookies");
   if (data.cookieCount === 0) {
-    throw new Error("没有可同步的数据，请先在域名管理中添加域名");
+    throw new Error("没有可同步的数据，请先在域名管理中添加并启用域名");
   }
   const plaintext = JSON.stringify(data);
   const encrypted = await crypto.encrypt(plaintext, cryptoKey);
@@ -59,7 +60,8 @@ export async function push() {
     data: encrypted.data,
   });
   console.log("[cloud-sync] push uploading, payload size:", payload.length, "bytes");
-  const result = await adapter.upload(payload);
+  const domainList = await whitelist.getDomainList();
+  const result = await adapter.upload(payload, domainList);
   if (typeof result === "string" && config.get().storageType === "gist") {
     console.log("[cloud-sync] push created new gist:", result);
     await config.updateStorageConfig("gist", { gistId: result });
@@ -81,16 +83,27 @@ export async function pull() {
   if (!config.isConfigured()) throw new Error("Cloud sync not configured");
   if (!adapter) throw new Error("存储后端未配置");
   console.log("[cloud-sync] pull start");
+
+  // Step 1: Download and discover new domains
+  const remoteDomainList = await adapter.downloadDomainList();
+  const { added } = await whitelist.addPendingDomains(remoteDomainList);
+  if (added.length > 0) {
+    console.log("[cloud-sync] pull discovered new domains:", added.join(", "));
+  }
+
+  // Step 2: Download encrypted data
   const encryptedPayload = await adapter.download();
   if (!encryptedPayload) throw new Error("云端暂无数据，请先在另一设备上推送");
   console.log("[cloud-sync] pull downloaded, size:", encryptedPayload.length, "bytes");
+
   let payload;
   try {
     payload = JSON.parse(encryptedPayload);
   } catch {
     throw new Error("云端数据格式错误");
   }
-  console.log("[cloud-sync] pull payload version:", payload.version, "crypto:", payload.crypto, "keyType:", payload.keyType);
+  console.log("[cloud-sync] pull payload version:", payload.version, "crypto:", payload.crypto);
+
   let plaintext;
   try {
     plaintext = await crypto.decrypt({ iv: payload.iv, data: payload.data }, cryptoKey);
@@ -99,38 +112,46 @@ export async function pull() {
   }
   const remoteData = JSON.parse(plaintext);
   console.log("[cloud-sync] pull remote data:", Object.keys(remoteData.cookies || {}).length, "domains,", remoteData.cookieCount || 0, "cookies");
+
+  // Step 3: Collect local data for conflict resolution
   const lastKnown = await loadLastKnown();
-  const localData = await dataCollector.collectAll(lastKnown);
+  const localData = await dataCollector.collectAll(null, lastKnown);
   console.log("[cloud-sync] pull local data:", localData.domainCount, "domains,", localData.cookieCount, "cookies");
+
+  // Step 4: Resolve conflicts
   const { merged, stats } = conflict.resolve(localData, remoteData, lastKnown);
   console.log("[cloud-sync] pull merged:", Object.keys(merged.cookies).length, "domains, stats:", JSON.stringify(stats));
 
-  // Request permissions for remote domains not yet allowed locally
-  // (moved to popup side — chrome.permissions.request needs user gesture)
-
+  // Step 5: Write only cloud-enabled domains
   const writeResult = await dataCollector.writeCookies(merged.cookies);
-  console.log("[cloud-sync] pull write result: written:", writeResult.written, "deleted:", writeResult.deleted, "skipped:", writeResult.skippedDomains);
+  console.log("[cloud-sync] pull write result: written:", writeResult.written, "deleted:", writeResult.deleted);
   await saveLastKnown(merged);
+
   await config.addSyncLogEntry({
     time: Date.now(),
     action: "pull",
     status: "success",
     domains: Object.keys(merged.cookies).length,
     cookies: writeResult.written,
-    skippedDomains: writeResult.skippedDomains,
   });
-  const result = { success: true, domains: Object.keys(merged.cookies).length, ...stats, written: writeResult.written, deleted: writeResult.deleted };
-  if (writeResult.skippedDomains?.length > 0) {
-    result.skippedDomains = writeResult.skippedDomains;
-  }
+
+  const result = {
+    success: true,
+    domains: Object.keys(merged.cookies).length,
+    ...stats,
+    written: writeResult.written,
+    deleted: writeResult.deleted,
+    newDomains: added,
+  };
   console.log("[cloud-sync] pull done");
   return result;
 }
 
 export async function sync() {
   if (!config.isConfigured()) throw new Error("Cloud sync not configured");
-  await push();
+  // Pull first to discover new domains, then push local changes
   await pull();
+  await push();
   await config.addSyncLogEntry({
     time: Date.now(),
     action: "sync",
