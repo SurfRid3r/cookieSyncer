@@ -18,7 +18,7 @@ export async function init() {
   await config.init();
   await initAdapter();
   await initCryptoKey();
-  setupAlarm();
+  await setupAlarm();
   console.log("[cloud-sync] init done, configured:", config.isConfigured(), "storage:", config.get().storageType);
 }
 
@@ -194,7 +194,7 @@ export async function updateSettings(settings) {
     const interval = Math.max(MIN_INTERVAL, settings.scheduleIntervalMinutes);
     await config.update({ scheduleIntervalMinutes: interval });
   }
-  setupAlarm();
+  await setupAlarm();
 }
 
 export async function updateStorage(type, storageConfig) {
@@ -224,16 +224,29 @@ async function initCryptoKey() {
   }
 }
 
-function setupAlarm() {
-  chrome.alarms.onAlarm.removeListener(handleAlarm);
-  chrome.alarms.clear(ALARM_NAME);
-
+async function setupAlarm() {
   const cfg = config.get();
-  if (!cfg.scheduleEnabled) return;
+
+  if (!cfg.scheduleEnabled) {
+    chrome.alarms.onAlarm.removeListener(handleAlarm);
+    chrome.alarms.clear(ALARM_NAME);
+    return;
+  }
 
   const interval = Math.max(MIN_INTERVAL, cfg.scheduleIntervalMinutes);
+  chrome.alarms.onAlarm.removeListener(handleAlarm);
   chrome.alarms.onAlarm.addListener(handleAlarm);
-  chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
+
+  // Only recreate the alarm if it doesn't exist or the period changed.
+  // Unconditional clear+create would reset the countdown on every SW restart.
+  const existing = await chrome.alarms.get(ALARM_NAME);
+  if (!existing || existing.periodInMinutes !== interval) {
+    chrome.alarms.clear(ALARM_NAME);
+    chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
+    console.log("[cloud-sync] alarm created/updated, interval:", interval, "min");
+  } else {
+    console.log("[cloud-sync] alarm already exists, interval:", interval, "min — not reset");
+  }
 }
 
 function handleAlarm(alarm) {
@@ -250,8 +263,7 @@ function handleSyncError(err) {
   // Stop scheduled sync on auth failures (expired/revoked token or password)
   if (msg.includes("authentication failed") || msg.includes("401")) {
     console.warn("[cloud-sync] Auth failure detected, stopping scheduled sync");
-    config.update({ scheduleEnabled: false });
-    setupAlarm();
+    config.update({ scheduleEnabled: false }).then(() => setupAlarm());
   }
   config.addSyncLogEntry({
     time: Date.now(),
