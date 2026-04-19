@@ -249,12 +249,16 @@ async function setupAlarm() {
   }
 }
 
-function handleAlarm(alarm) {
-  if (alarm.name !== ALARM_NAME) return;
+export function triggerScheduledSync() {
   const mode = config.get().mode;
   if (mode === "push-only") push().catch(handleSyncError);
   else if (mode === "pull-only") pull().catch(handleSyncError);
   else sync().catch(handleSyncError);
+}
+
+function handleAlarm(alarm) {
+  if (alarm.name !== ALARM_NAME) return;
+  triggerScheduledSync();
 }
 
 async function handleSyncError(err) {
