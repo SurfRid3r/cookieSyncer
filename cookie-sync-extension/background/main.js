@@ -168,10 +168,14 @@ async function onDaemonMessage(cmd) {
   }
 }
 
-// --- Alarm: keep SW alive + reconnect ---
+// --- Alarm: keep SW alive + reconnect + scheduled sync ---
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "keepalive") {
     void ensureReady();
+  } else if (alarm.name === "cloud-sync") {
+    // Ensure initialization is complete before triggering sync.
+    // Needed when SW is woken by the alarm itself (before async init() finishes).
+    void ensureReady().then(() => cloudSync.triggerScheduledSync());
   }
 });
 

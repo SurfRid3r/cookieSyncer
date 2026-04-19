@@ -19,7 +19,7 @@ export async function init() {
   await config.init();
   await initAdapter();
   await initCryptoKey();
-  setupAlarm();
+  await setupAlarm();
   console.log("[cloud-sync] init done, configured:", config.isConfigured(), "storage:", config.get().storageType);
 }
 
@@ -215,7 +215,7 @@ export async function updateSettings(settings) {
     const interval = Math.max(MIN_INTERVAL, settings.scheduleIntervalMinutes);
     await config.update({ scheduleIntervalMinutes: interval });
   }
-  setupAlarm();
+  await setupAlarm();
 }
 
 export async function updateStorage(type, storageConfig) {
@@ -245,36 +245,49 @@ async function initCryptoKey() {
   }
 }
 
-function setupAlarm() {
-  chrome.alarms.onAlarm.removeListener(handleAlarm);
-  chrome.alarms.clear(ALARM_NAME);
-
+async function setupAlarm() {
   const cfg = config.get();
-  if (!cfg.scheduleEnabled) return;
+
+  if (!cfg.scheduleEnabled) {
+    await chrome.alarms.clear(ALARM_NAME);
+    return;
+  }
 
   const interval = Math.max(MIN_INTERVAL, cfg.scheduleIntervalMinutes);
-  chrome.alarms.onAlarm.addListener(handleAlarm);
-  chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
+
+  // Only recreate the alarm if it doesn't exist or the period changed.
+  // Unconditional clear+create would reset the countdown on every SW restart.
+  const existing = await chrome.alarms.get(ALARM_NAME);
+  if (!existing || existing.periodInMinutes !== interval) {
+    await chrome.alarms.clear(ALARM_NAME);
+    chrome.alarms.create(ALARM_NAME, { periodInMinutes: interval });
+    console.log("[cloud-sync] alarm created/updated, interval:", interval, "min");
+  } else {
+    console.log("[cloud-sync] alarm already exists, interval:", interval, "min — not reset");
+  }
 }
 
-function handleAlarm(alarm) {
-  if (alarm.name !== ALARM_NAME) return;
+export function triggerScheduledSync() {
   const mode = config.get().mode;
   if (mode === "push-only") push().catch(handleSyncError);
   else if (mode === "pull-only") pull().catch(handleSyncError);
   else sync().catch(handleSyncError);
 }
 
-function handleSyncError(err) {
+async function handleSyncError(err) {
   console.error("[cloud-sync] Scheduled sync failed:", err);
   const msg = err.message || "";
   // Stop scheduled sync on auth failures (expired/revoked token or password)
   if (msg.includes("authentication failed") || msg.includes("401")) {
     console.warn("[cloud-sync] Auth failure detected, stopping scheduled sync");
-    config.update({ scheduleEnabled: false });
-    setupAlarm();
+    try {
+      await config.update({ scheduleEnabled: false });
+      await setupAlarm();
+    } catch (e) {
+      console.error("[cloud-sync] Failed to disable alarm after auth failure:", e);
+    }
   }
-  config.addSyncLogEntry({
+  await config.addSyncLogEntry({
     time: Date.now(),
     action: config.get().mode,
     status: "error",
