@@ -9,8 +9,9 @@ Retrieve browser cookies from the command line via a Chrome extension + local da
 ```
 Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
    │                                                     │
-   ├─ Domain whitelist management                         ├─ CLI output
-   ├─ Capture cookies                                     └─ Cookie Header
+   ├─ Domain management (local + cloud)                   ├─ CLI output
+   ├─ Cookie capture & filtering                          └─ Cookie Header
+   ├─ Cloud sync (Gist/WebDAV + AES-256-GCM)
    └─ Popup UI
 ```
 
@@ -20,7 +21,7 @@ Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_dae
 
 1. Open `chrome://extensions/` and enable Developer Mode
 2. Click "Load unpacked" and select the `cookie-sync-extension/` directory
-3. Click the extension icon and add target domains to the whitelist
+3. Click the extension icon and add target domains (each domain can independently control local daemon access and cloud sync)
 
 ### 2. Use with Claude Code
 
@@ -48,7 +49,7 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
 │   │   ├── connection.js     # WebSocket connection
 │   │   ├── cookie-ops.js     # Cookie operations
 │   │   ├── domain-utils.js   # Domain utilities
-│   │   ├── whitelist.js      # Whitelist management
+│   │   ├── whitelist.js      # Unified domain management (localAccess + cloudSync)
 │   │   └── cloud/            # Cloud sync modules
 │   │       ├── sync-engine.js  # Sync orchestration
 │   │       ├── crypto.js       # AES-256-GCM encryption
@@ -91,6 +92,14 @@ Encrypted cross-device cookie sync via GitHub Gist or WebDAV.
 
 After first push on device A, the status card shows the **Gist ID**. On device B, enter the same Token + that Gist ID to sync to the same data.
 
+### Domain Management
+
+Each domain has two independent controls:
+- **Local Access** (本地ON/OFF): Whether the local daemon can retrieve cookies for this domain
+- **Cloud Sync** (云端ON/OFF): Whether this domain's cookies participate in cloud sync
+
+When pulling from cloud, newly discovered domains appear as "Pending" and require user confirmation before syncing.
+
 ### GitHub Token Permissions
 
 When creating a Personal Access Token (classic) at https://github.com/settings/tokens, only one scope is required:
@@ -108,9 +117,9 @@ No other scopes are needed. The token only needs gist access — it does not nee
 
 ## Security
 
-- Only reads cookies for whitelisted domains
+- Only reads/writes cookies for domains with respective access enabled
 - WebSocket listens on localhost only
-- Extension requires manual host permission grants
+- Browser permission granted at install (`<all_urls>`), actual access controlled by per-domain settings
 - Cloud sync uses AES-256-GCM encryption with random IV per upload
 - Encryption key stored locally only (chrome.storage.local, not synced by Chrome)
 - GitHub Token only needs `gist` scope, no repo access required

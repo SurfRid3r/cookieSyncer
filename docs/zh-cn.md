@@ -7,8 +7,9 @@
 ```
 Chrome 扩展  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
    │                                                  │
-   ├─ 管理域名白名单                                   ├─ CLI 输出
-   ├─ 监听/捕获 Cookie                                └─ Cookie Header
+   ├─ 域名管理（本地获取 + 云端同步）                    ├─ CLI 输出
+   ├─ Cookie 捕获与过滤                                └─ Cookie Header
+   ├─ 云同步（Gist/WebDAV + AES-256-GCM）
    └─ Popup UI
 ```
 
@@ -18,7 +19,7 @@ Chrome 扩展  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon
 
 1. 打开 `chrome://extensions/`，开启开发者模式
 2. 点击「加载已解压的扩展程序」，选择 `cookie-sync-extension/` 目录
-3. 点击扩展图标，将目标域名加入白名单
+3. 点击扩展图标，添加目标域名（每个域名可独立控制本地获取和云端同步）
 
 ### 2. 使用 Claude Skill
 
@@ -48,7 +49,7 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
 │   │   ├── connection.js     # WebSocket 连接管理
 │   │   ├── cookie-ops.js     # Cookie 操作
 │   │   ├── domain-utils.js   # 域名工具
-│   │   ├── whitelist.js      # 白名单管理
+│   │   ├── whitelist.js      # 统一域名管理（localAccess + cloudSync）
 │   │   └── cloud/            # 云同步模块
 │   │       ├── sync-engine.js  # 同步编排引擎
 │   │       ├── crypto.js       # AES-256-GCM 加密
@@ -91,6 +92,14 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
 
 在设备 A 首次推送后，状态卡片会显示 **Gist ID**。在设备 B 上填入相同的 Token 和该 Gist ID，即可同步同一份数据。
 
+### 域名管理
+
+每个域名有两个独立的控制维度：
+- **本地获取**（本地ON/OFF）：是否允许本地 daemon 获取该域名的 Cookie
+- **云端同步**（云端ON/OFF）：该域名的 Cookie 是否参与云端同步
+
+从云端拉取时，新发现的域名会以"待确认"状态出现，需用户确认后才参与同步。
+
 ### GitHub Token 权限
 
 在 https://github.com/settings/tokens 创建 Personal Access Token (classic) 时，只需勾选一个权限：
@@ -108,9 +117,9 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
 
 ## 安全
 
-- 仅读取白名单内域名的 Cookie
+- 仅读取/写入已启用对应权限的域名 Cookie
 - WebSocket 仅监听 localhost
-- 扩展需要用户手动授予主机权限
+- 浏览器权限安装时一次性授予（`<all_urls>`），实际访问由每个域名的独立设置控制
 - 云同步使用 AES-256-GCM 加密，每次上传随机 IV
 - 加密密钥仅存储在本地（chrome.storage.local，不会通过 Chrome Sync 同步）
 - GitHub Token 仅需 `gist` 权限，无法访问你的仓库

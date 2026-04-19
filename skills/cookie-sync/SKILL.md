@@ -19,17 +19,17 @@ description: 通过本地 Cookie Sync 工具获取浏览器中指定域名的 co
 # 正常调用：直接输出 Cookie Header
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
 
-# 查看白名单
+# 查看已启用本地获取的域名列表
 python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
 ```
 
 ## 故障排查
 
 - `No browser extension connected`：要求用户打开 Chrome 并确认扩展已启用；如未安装，使用仓库中的 `cookie-sync-extension/`，在 `chrome://extensions/` 打开开发者模式后加载。
-- `Domain not allowed: xxx`：要求用户将对应域名加入扩展白名单；必要时先用 `--list` 检查当前允许列表。
+- `Domain not allowed: xxx`：要求用户在扩展弹窗中将对应域名添加并开启「本地ON」（本地获取开关）；必要时先用 `--list` 检查当前已启用本地获取的域名列表。
 - `ModuleNotFoundError` 或缺少 `websockets`：执行 `pip install websockets` 后重试。
 - 超时或无响应：提示用户确认 Chrome 正在运行，并等待几秒后重试；脚本在本地 daemon 未运行时会临时起一个服务等待扩展回连，首次连接会有延迟。
-- 需要确认是否是首次环境问题时，再逐项检查扩展安装、白名单配置、依赖安装，而不是在正常执行前默认要求这些步骤。
+- 需要确认是否是首次环境问题时，再逐项检查扩展安装、域名配置、依赖安装，而不是在正常执行前默认要求这些步骤。
 
 ## 何时阅读脚本
 
@@ -37,4 +37,4 @@ python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
 
 - 需要修改输出格式。
 - 需要排查 WebSocket 通信问题。
-- 需要扩展新的请求动作，例如查询白名单或支持新的入参。
+- 需要扩展新的请求动作，例如查询域名列表或支持新的入参。
