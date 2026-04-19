@@ -93,6 +93,64 @@
     .pagination button:disabled { color: #ccc; cursor: default; }
     .pagination .page-info { font-size: 11px; color: #999; }
     .footer { margin-top: 14px; text-align: center; font-size: 11px; color: #999; padding-bottom: 4px; }
+    .domain-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .toggle-btn {
+      border: none;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      min-width: 28px;
+    }
+    .toggle-on {
+      background: #34c759;
+      color: #fff;
+    }
+    .toggle-on:hover { background: #2db84d; }
+    .toggle-off {
+      background: #e0e0e0;
+      color: #999;
+    }
+    .toggle-off:hover { background: #d0d0d0; }
+    .badge {
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .badge-enabled {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .badge-pending {
+      background: #fff3e0;
+      color: #ef6c00;
+      cursor: pointer;
+    }
+    .badge-pending:hover { background: #ffe0b2; }
+    .badge-disabled {
+      background: #f5f5f5;
+      color: #bbb;
+      cursor: pointer;
+    }
+    .badge-disabled:hover { background: #eeeeee; }
+    .remove-btn {
+      border: none;
+      background: none;
+      color: #ccc;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .remove-btn:hover { color: #ff3b30; background: #fff; }
   </style>
   <link rel="stylesheet" href="cloud-tab.css">
 </head>
@@ -111,9 +169,9 @@
       <span class="status-text" id="status">Checking...</span>
     </div>
     <div class="domain-section">
-      <h2>Allowed Domains</h2>
+      <h2>域名管理</h2>
       <div class="domain-input-row">
-        <input type="text" id="domainInput" placeholder="e.g. example.com">
+        <input type="text" id="domainInput" placeholder="例如 example.com">
         <button id="addBtn">Add</button>
       </div>
       <div class="domain-error" id="domainError"></div>
@@ -124,7 +182,7 @@
   <div class="tab-content" id="tab-cloud">
     <div id="cloud-content"></div>
   </div>
-  <div class="footer">Cookie Sync v1.0.0</div>
+  <div class="footer">Cookie Sync v1.2.0</div>
   <script type="module" src="popup.js"></script>
 </body>
 </html>
