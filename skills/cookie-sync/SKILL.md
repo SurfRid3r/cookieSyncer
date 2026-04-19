@@ -9,44 +9,27 @@ description: 通过本地 Cookie Sync 工具获取浏览器中指定域名的 co
 
 ## 执行流程
 
-1. 确认用户要读取的目标域名或 URL。
-2. 检查 Chrome 扩展是否已安装并启用；扩展目录位于仓库中的 `cookie-sync-extension/`。
-3. 必要时提醒用户在 `chrome://extensions/` 打开开发者模式并加载该扩展。
-4. 提醒用户将目标域名加入扩展白名单；未加入白名单的域名无法读取。
-5. 如果环境缺少依赖，安装 `websockets`。
-6. 运行 `python skills/cookie-sync/scripts/cookie_sync_daemon.py <domain>` 获取 Cookie Header，或使用 `--json` 输出 JSON。
-7. 将结果直接用于后续命令、脚本或调试流程，不要手动改写 cookie 内容，除非用户明确要求。
+1. 确认用户要读取的目标域名或 URL；如果拿到的是 URL，先提取域名。
+2. 默认直接运行 `python skills/cookie-sync/scripts/cookie_sync_daemon.py <domain>`；脚本会把标准 Cookie Header 输出到 stdout，可以直接作为管道或命令替换传给 `curl` 等 HTTP 客户端。
+3. 只有命令失败时，才进入“故障排查”里的首次配置或环境检查步骤；不要在正常路径里预先展开这些一次性操作。
 
 ## 常用命令
 
 ```bash
-# 以 Cookie Header 形式输出，适合直接传给 curl 或其他 HTTP 客户端
+# 正常调用：直接输出 Cookie Header
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
 
-# 以 JSON 形式输出
-python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com --json
-
-# 查看当前白名单域名
+# 查看白名单
 python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
-```
-
-## 输出使用方式
-
-- 需要构造请求头时，直接使用标准 Cookie Header 输出。
-- 需要机器可读结果时，使用 `--json`。
-- 需要只提取 cookie 字符串时，可配合 `jq -r '.cookies'`。
-
-示例：
-
-```bash
-curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com)" https://api.example.com/me
 ```
 
 ## 故障排查
 
-- `No browser extension connected`：要求用户打开 Chrome 并确认扩展已启用。
-- `Domain not allowed: xxx`：要求用户将对应域名加入扩展白名单。
-- 超时或无响应：提示用户确认 Chrome 正在运行，并等待几秒后重试；扩展通过 WebSocket 回连，本身存在短暂延迟。
+- `No browser extension connected`：要求用户打开 Chrome 并确认扩展已启用；如未安装，使用仓库中的 `cookie-sync-extension/`，在 `chrome://extensions/` 打开开发者模式后加载。
+- `Domain not allowed: xxx`：要求用户将对应域名加入扩展白名单；必要时先用 `--list` 检查当前允许列表。
+- `ModuleNotFoundError` 或缺少 `websockets`：执行 `pip install websockets` 后重试。
+- 超时或无响应：提示用户确认 Chrome 正在运行，并等待几秒后重试；脚本在本地 daemon 未运行时会临时起一个服务等待扩展回连，首次连接会有延迟。
+- 需要确认是否是首次环境问题时，再逐项检查扩展安装、白名单配置、依赖安装，而不是在正常执行前默认要求这些步骤。
 
 ## 何时阅读脚本
 

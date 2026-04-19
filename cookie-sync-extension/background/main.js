@@ -3,10 +3,11 @@
 import * as connection from "./connection.js";
 import * as cookieOps from "./cookie-ops.js";
 import * as whitelist from "./whitelist.js";
+import * as cloudSync from "./cloud/sync-engine.js";
 
 let initialized = false;
 let initPromise = null;
-let pendingDomain = null;
+
 const popupHandlers = {
   getStatus: () => connection.getStatus(),
   popupOpened: async () => {
@@ -15,29 +16,109 @@ const popupHandlers = {
   },
   getDomains: async () => {
     await ensureReady();
-    return { domains: whitelist.getAllowedDomains() };
+    return { domains: whitelist.getAllowedDomains(), entries: whitelist.getAllDomainEntries() };
   },
-  pendingDomain: ({ domain }) => {
-    pendingDomain = domain;
+  addDomain: async ({ domain }) => {
+    await ensureReady();
+    return whitelist.addDomain(domain);
+  },
+  removeDomain: async ({ domain }) => {
+    await ensureReady();
+    return whitelist.removeDomain(domain);
+  },
+  setLocalAccess: async ({ domain, value }) => {
+    await ensureReady();
+    return whitelist.setLocalAccess(domain, value);
+  },
+  setCloudSync: async ({ domain, status }) => {
+    await ensureReady();
+    return whitelist.setCloudSync(domain, status);
+  },
+
+  // Cloud sync handlers
+  cloudGetStatus: async () => {
+    await ensureReady();
+    const status = cloudSync.getStatus();
+    console.log("[cloud-sync] getStatus: configured:", status.configured, "hasKey:", status.hasKey, "storage:", status.storageType);
+    return status;
+  },
+  cloudPush: async () => {
+    console.log("[cloud-sync] cloudPush handler");
+    await ensureReady();
+    try {
+      return await cloudSync.push();
+    } catch (err) {
+      console.error("[cloud-sync] cloudPush failed:", err.message);
+      await cloudSync.logError("push", err.message);
+      throw err;
+    }
+  },
+  cloudPull: async () => {
+    console.log("[cloud-sync] cloudPull handler");
+    await ensureReady();
+    try {
+      return await cloudSync.pull();
+    } catch (err) {
+      console.error("[cloud-sync] cloudPull failed:", err.message);
+      await cloudSync.logError("pull", err.message);
+      throw err;
+    }
+  },
+  cloudSync: async () => {
+    console.log("[cloud-sync] cloudSync handler");
+    await ensureReady();
+    try {
+      return await cloudSync.sync();
+    } catch (err) {
+      console.error("[cloud-sync] cloudSync failed:", err.message);
+      await cloudSync.logError("sync", err.message);
+      throw err;
+    }
+  },
+  cloudTestConnection: async () => {
+    await ensureReady();
+    const ok = await cloudSync.testConnection();
+    return { ok };
+  },
+  cloudGenerateKey: async () => {
+    await ensureReady();
+    const exported = await cloudSync.generateAndStoreKey();
+    return { ok: true, key: exported };
+  },
+  cloudImportKey: async ({ key }) => {
+    await ensureReady();
+    const exported = await cloudSync.importAndStoreKey(key);
+    return { ok: true, key: exported };
+  },
+  cloudDeriveKey: async ({ password }) => {
+    await ensureReady();
+    const exported = await cloudSync.deriveAndStoreKey(password);
+    return { ok: true, key: exported };
+  },
+  cloudExportKey: async () => {
+    await ensureReady();
+    const key = cloudSync.getExportedKey();
+    return { ok: true, key };
+  },
+  cloudUpdateSettings: async ({ settings }) => {
+    await ensureReady();
+    await cloudSync.updateSettings(settings);
     return { ok: true };
   },
-  confirmDomain: async ({ domain }) => {
+  cloudUpdateStorage: async (msg) => {
     await ensureReady();
-    pendingDomain = null;
-    const result = await whitelist.addDomain(domain);
-    // Domain may already exist if onAdded handler added it first
-    if (!result.ok && result.error === "Domain already allowed") {
-      return { ok: true };
-    }
-    return result;
+    const storageType = msg?.config?.type;
+    const storageConfig = msg?.config?.config;
+    if (!storageType) return { ok: false, error: "Missing storage type" };
+    await cloudSync.updateStorage(storageType, storageConfig);
+    return { ok: true };
   },
-  removeDomain: async ({ domain, skipPermissionRevoke }) => {
+  cloudGetSyncLog: async () => {
+    console.log("[cloud-sync] cloudGetSyncLog handler");
     await ensureReady();
-    const result = await whitelist.removeDomain(domain, {
-      skipPermissionRevoke: skipPermissionRevoke === true,
-    });
-    console.log("[cookie-sync] removeDomain completed:", result);
-    return result;
+    const log = cloudSync.getSyncLog();
+    console.log("[cloud-sync] cloudGetSyncLog returning", log.length, "entries");
+    return { log };
   },
 };
 
@@ -48,6 +129,7 @@ async function initialize() {
   initPromise = (async () => {
     await whitelist.init();
     connection.init(onDaemonMessage);
+    await cloudSync.init();
     chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
     console.log("[cookie-sync] Extension initialized");
     initialized = true;
@@ -86,18 +168,6 @@ async function onDaemonMessage(cmd) {
   }
 }
 
-// --- Permission granted fallback (handles popup-closing during dialog) ---
-chrome.permissions.onAdded.addListener(async (permissions) => {
-  if (!pendingDomain) return;
-  await initialize();
-  const origins = permissions.origins || [];
-  const patterns = whitelist.getOriginPatterns(pendingDomain);
-  if (patterns.some((p) => origins.includes(p))) {
-    await whitelist.addDomain(pendingDomain).catch(() => {});
-    pendingDomain = null;
-  }
-});
-
 // --- Alarm: keep SW alive + reconnect ---
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "keepalive") {
@@ -123,7 +193,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })
     .catch((err) => {
       const error = err.message || String(err);
-      sendResponse(msg?.type === "getDomains" ? { domains: [], error } : { ok: false, error });
+      sendResponse(msg?.type === "getDomains" ? { domains: [], entries: [], error } : { ok: false, error });
     });
   return msg?.type !== "getStatus";
 });

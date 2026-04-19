@@ -10,8 +10,8 @@ Retrieve browser cookies from the command line via a Chrome extension + local da
 Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
    │                                                     │
    ├─ Domain whitelist management                         ├─ CLI output
-   ├─ Capture cookies                                     ├─ Cookie Header
-   └─ Popup UI                                            └─ JSON format
+   ├─ Capture cookies                                     └─ Cookie Header
+   └─ Popup UI
 ```
 
 ## Quick Start
@@ -27,9 +27,6 @@ Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_dae
 ```bash
 # Cookie Header format (for curl)
 python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
-
-# JSON format
-python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com --json
 
 # List whitelisted domains
 python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
@@ -51,8 +48,21 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
 │   │   ├── connection.js     # WebSocket connection
 │   │   ├── cookie-ops.js     # Cookie operations
 │   │   ├── domain-utils.js   # Domain utilities
-│   │   └── whitelist.js      # Whitelist management
+│   │   ├── whitelist.js      # Whitelist management
+│   │   └── cloud/            # Cloud sync modules
+│   │       ├── sync-engine.js  # Sync orchestration
+│   │       ├── crypto.js       # AES-256-GCM encryption
+│   │       ├── config.js       # Configuration management
+│   │       ├── storage-adapter.js  # Storage interface
+│   │       ├── gist-adapter.js     # GitHub Gist backend
+│   │       ├── webdav-adapter.js   # WebDAV backend
+│   │       ├── data-collector.js   # Cookie + localStorage collector
+│   │       └── conflict.js        # Conflict resolution
 │   ├── popup/                # Popup UI
+│   │   ├── popup.html        # Tab-based layout
+│   │   ├── popup.js          # Tab routing + domain management
+│   │   ├── cloud-tab.js      # Cloud sync tab
+│   │   └── cloud-tab.css     # Cloud sync styles
 │   ├── icons/                # Extension icons
 │   └── manifest.json
 │
@@ -64,6 +74,33 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
         └── cookie_sync_daemon.py  # Daemon script
 ```
 
+## Cloud Sync
+
+Encrypted cross-device cookie sync via GitHub Gist or WebDAV.
+
+### Setup
+
+1. Open the extension popup and switch to the **☁️ Cloud Sync** tab
+2. Configure encryption key (auto-generate recommended)
+3. Choose storage backend and configure:
+   - **GitHub Gist**: Enter a GitHub Token (see below)
+   - **WebDAV**: Enter server URL, username, and password
+4. Click **Save** to activate
+
+### Multi-device Sync
+
+After first push on device A, the status card shows the **Gist ID**. On device B, enter the same Token + that Gist ID to sync to the same data.
+
+### GitHub Token Permissions
+
+When creating a Personal Access Token (classic) at https://github.com/settings/tokens, only one scope is required:
+
+| Scope | Required | Purpose |
+|-------|----------|---------|
+| `gist` | **Yes** | Create, read, and update gists |
+
+No other scopes are needed. The token only needs gist access — it does not need access to your repos, issues, or any other GitHub resources.
+
 ## Dependencies
 
 - Chrome browser
@@ -74,3 +111,6 @@ curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py examp
 - Only reads cookies for whitelisted domains
 - WebSocket listens on localhost only
 - Extension requires manual host permission grants
+- Cloud sync uses AES-256-GCM encryption with random IV per upload
+- Encryption key stored locally only (chrome.storage.local, not synced by Chrome)
+- GitHub Token only needs `gist` scope, no repo access required

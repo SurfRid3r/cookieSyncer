@@ -4,7 +4,6 @@ Cookie Sync — One-shot tool to fetch browser cookies via WebSocket daemon.
 Usage:
   pip install websockets
   python cookie_sync_daemon.py example.com           # cookie header format
-  python cookie_sync_daemon.py example.com --json     # JSON format
   python cookie_sync_daemon.py --list                 # list whitelisted domains
 """
 
@@ -134,7 +133,6 @@ def format_cookies(data):
 
 def main():
     args = sys.argv[1:]
-    use_json = "--json" in args
     list_mode = "--list" in args
     domain = [a for a in args if not a.startswith("--")]
 
@@ -150,7 +148,7 @@ def main():
         return
 
     if not domain:
-        print("Usage: python cookie_sync_daemon.py <domain> [--json]", file=sys.stderr)
+        print("Usage: python cookie_sync_daemon.py <domain>", file=sys.stderr)
         print("       python cookie_sync_daemon.py --list", file=sys.stderr)
         sys.exit(1)
 
@@ -170,10 +168,7 @@ def main():
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
 
-    if use_json:
-        print(json.dumps({"domain": domain, "cookies": header}, ensure_ascii=False))
-    else:
-        print(header)
+    print(header)
 
 
 if __name__ == "__main__":

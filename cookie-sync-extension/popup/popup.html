@@ -6,24 +6,45 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       width: 320px;
-      max-height: 500px;
-      overflow-y: auto;
+      min-height: 200px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       color: #333;
       background: #fff;
-      padding: 16px;
     }
     .header {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 14px;
+      padding: 12px 16px 0;
     }
     .header img { width: 24px; height: 24px; }
     .header h1 { font-size: 15px; font-weight: 600; }
-
-    /* Status row */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 0 16px;
+      margin-top: 8px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 8px 0;
+      border: none;
+      background: none;
+      font-size: 12px;
+      color: #999;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      font-weight: 500;
+    }
+    .tab-btn.active {
+      color: #007aff;
+      border-bottom-color: #007aff;
+      font-weight: 600;
+    }
+    .tab-btn:hover:not(.active) { color: #666; }
+    .tab-content { display: none; padding: 14px 16px; }
+    .tab-content.active { display: block; }
     .status-row {
       display: flex;
       align-items: center;
@@ -32,217 +53,127 @@
       border-radius: 8px;
       background: #f5f5f5;
     }
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .dot.connected { background: #34c759; }
     .dot.disconnected { background: #ff3b30; }
     .dot.connecting { background: #ff9500; }
     .status-text { font-size: 13px; color: #555; }
     .status-text strong { color: #333; }
-
-    /* Domain section */
-    .domain-section {
-      margin-top: 14px;
-    }
-    .domain-section h2 {
-      font-size: 13px;
-      font-weight: 600;
-      color: #555;
-      margin-bottom: 8px;
-    }
-    .domain-input-row {
-      display: flex;
-      gap: 6px;
-    }
+    .domain-section { margin-top: 14px; }
+    .domain-section h2 { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px; }
+    .domain-input-row { display: flex; gap: 6px; }
     .domain-input-row input {
-      flex: 1;
-      padding: 6px 10px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 12px;
-      outline: none;
+      flex: 1; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; outline: none;
     }
-    .domain-input-row input:focus {
-      border-color: #007aff;
-    }
+    .domain-input-row input:focus { border-color: #007aff; }
     .domain-input-row button {
-      padding: 6px 12px;
-      border: none;
-      border-radius: 6px;
-      background: #007aff;
-      color: #fff;
-      font-size: 12px;
+      padding: 6px 12px; border: none; border-radius: 6px; background: #007aff; color: #fff;
+      font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+    }
+    .domain-input-row button:hover { background: #0066d6; }
+    .domain-error { font-size: 11px; color: #ff3b30; margin-top: 4px; min-height: 16px; }
+    .domain-list { margin-top: 8px; }
+    .domain-empty { font-size: 11px; color: #999; text-align: center; padding: 12px 0; }
+    .domain-group { margin-bottom: 6px; border-radius: 8px; background: #f5f5f5; overflow: hidden; }
+    .group-header { display: flex; align-items: center; padding: 8px 10px; cursor: pointer; user-select: none; }
+    .group-header:hover { background: #eee; }
+    .group-arrow { font-size: 10px; color: #999; margin-right: 6px; width: 12px; text-align: center; transition: transform 0.15s; flex-shrink: 0; }
+    .group-arrow.expanded { transform: rotate(90deg); }
+    .group-name { font-size: 12px; font-weight: 600; color: #333; flex: 1; word-break: break-all; }
+    .group-count { font-size: 11px; color: #999; margin-right: 4px; flex-shrink: 0; }
+    .group-children { display: none; }
+    .group-children.expanded { display: block; }
+    .subdomain-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px 5px 28px; border-top: 1px solid #eee; }
+    .subdomain-item span { font-size: 11px; color: #555; word-break: break-all; }
+    .subdomain-item button { border: none; background: none; color: #bbb; font-size: 10px; cursor: pointer; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+    .subdomain-item button:hover { color: #ff3b30; background: #fff; }
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 10px; }
+    .pagination button { border: none; background: #f5f5f5; color: #555; font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+    .pagination button:hover:not(:disabled) { background: #e0e0e0; }
+    .pagination button:disabled { color: #ccc; cursor: default; }
+    .pagination .page-info { font-size: 11px; color: #999; }
+    .footer { margin-top: 14px; text-align: center; font-size: 11px; color: #999; padding-bottom: 4px; }
+    .domain-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .badge {
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: 3px;
       font-weight: 500;
-      cursor: pointer;
       white-space: nowrap;
-    }
-    .domain-input-row button:hover {
-      background: #0066d6;
-    }
-    .domain-error {
-      font-size: 11px;
-      color: #ff3b30;
-      margin-top: 4px;
-      min-height: 16px;
-    }
-
-    /* Group list */
-    .domain-list {
-      margin-top: 8px;
-    }
-    .domain-empty {
-      font-size: 11px;
-      color: #999;
-      text-align: center;
-      padding: 12px 0;
-    }
-
-    /* Domain group */
-    .domain-group {
-      margin-bottom: 6px;
-      border-radius: 8px;
-      background: #f5f5f5;
-      overflow: hidden;
-    }
-    .group-header {
-      display: flex;
-      align-items: center;
-      padding: 8px 10px;
       cursor: pointer;
-      user-select: none;
     }
-    .group-header:hover {
-      background: #eee;
+    .toggle-on {
+      background: #e3f2fd;
+      color: #1565c0;
     }
-    .group-arrow {
-      font-size: 10px;
-      color: #999;
-      margin-right: 6px;
-      width: 12px;
-      text-align: center;
-      transition: transform 0.15s;
-      flex-shrink: 0;
+    .toggle-on:hover { background: #bbdefb; }
+    .toggle-off {
+      background: #f5f5f5;
+      color: #bbb;
     }
-    .group-arrow.expanded {
-      transform: rotate(90deg);
+    .toggle-off:hover { background: #eee; }
+    .badge-enabled {
+      background: #e8f5e9;
+      color: #2e7d32;
     }
-    .group-name {
-      font-size: 12px;
-      font-weight: 600;
-      color: #333;
-      flex: 1;
-      word-break: break-all;
+    .badge-enabled:hover { background: #c8e6c9; }
+    .badge-pending {
+      background: #fff3e0;
+      color: #ef6c00;
     }
-    .group-count {
-      font-size: 11px;
-      color: #999;
-      margin-right: 4px;
-      flex-shrink: 0;
+    .badge-pending:hover { background: #ffe0b2; }
+    .badge-disabled {
+      background: #f5f5f5;
+      color: #bbb;
     }
-    .group-toggle {
-      font-size: 10px;
-      color: #999;
-      flex-shrink: 0;
-    }
-
-    /* Subdomain items */
-    .group-children {
-      display: none;
-    }
-    .group-children.expanded {
-      display: block;
-    }
-    .subdomain-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 5px 10px 5px 28px;
-      border-top: 1px solid #eee;
-    }
-    .subdomain-item span {
-      font-size: 11px;
-      color: #555;
-      word-break: break-all;
-    }
-    .subdomain-item button {
+    .badge-disabled:hover { background: #eeeeee; }
+    .remove-btn {
       border: none;
       background: none;
-      color: #bbb;
-      font-size: 10px;
-      cursor: pointer;
-      padding: 2px 6px;
-      border-radius: 4px;
-      flex-shrink: 0;
-    }
-    .subdomain-item button:hover {
-      color: #ff3b30;
-      background: #fff;
-    }
-
-    /* Pagination */
-    .pagination {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      margin-top: 10px;
-    }
-    .pagination button {
-      border: none;
-      background: #f5f5f5;
-      color: #555;
-      font-size: 11px;
-      padding: 4px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .pagination button:hover:not(:disabled) {
-      background: #e0e0e0;
-    }
-    .pagination button:disabled {
       color: #ccc;
-      cursor: default;
-    }
-    .pagination .page-info {
       font-size: 11px;
-      color: #999;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 3px;
     }
-
-    .footer {
-      margin-top: 14px;
-      text-align: center;
-      font-size: 11px;
-      color: #999;
-    }
+    .remove-btn:hover { color: #ff3b30; background: #fff; }
   </style>
+  <link rel="stylesheet" href="cloud-tab.css">
 </head>
 <body>
   <div class="header">
     <img src="../icons/icon-48.png" alt="Cookie Sync">
     <h1>Cookie Sync</h1>
   </div>
-
-  <div class="status-row">
-    <span class="dot disconnected" id="dot"></span>
-    <span class="status-text" id="status">Checking...</span>
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="domains">域名管理</button>
+    <button class="tab-btn" data-tab="cloud">☁️ 云同步</button>
   </div>
-
-  <div class="domain-section">
-    <h2>Allowed Domains</h2>
-    <div class="domain-input-row">
-      <input type="text" id="domainInput" placeholder="e.g. example.com">
-      <button id="addBtn">Add</button>
+  <div class="tab-content active" id="tab-domains">
+    <div class="status-row">
+      <span class="dot disconnected" id="dot"></span>
+      <span class="status-text" id="status">Checking...</span>
     </div>
-    <div class="domain-error" id="domainError"></div>
-    <div class="domain-list" id="domainList"></div>
-    <div class="pagination" id="pagination"></div>
+    <div class="domain-section">
+      <h2>域名管理</h2>
+      <div class="domain-input-row">
+        <input type="text" id="domainInput" placeholder="例如 example.com">
+        <button id="addBtn">Add</button>
+      </div>
+      <div class="domain-error" id="domainError"></div>
+      <div class="domain-list" id="domainList"></div>
+      <div class="pagination" id="pagination"></div>
+    </div>
   </div>
-
-  <div class="footer">Cookie Sync v1.0.0</div>
-
+  <div class="tab-content" id="tab-cloud">
+    <div id="cloud-content"></div>
+  </div>
+  <div class="footer">Cookie Sync v1.2.0</div>
   <script type="module" src="popup.js"></script>
 </body>
 </html>

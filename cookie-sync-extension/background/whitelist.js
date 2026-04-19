@@ -1,111 +1,174 @@
-// whitelist.js — Domain whitelist management with chrome.storage.sync
+// whitelist.js — Unified domain management with cloudDomains
+// Replaces old whitelist. Each domain has:
+//   localAccess: boolean (allowed for local daemon WebSocket access)
+//   cloudSync: "enabled" | "pending" | "disabled"
 
-import { normalizeDomain, getOriginPatterns } from "./domain-utils.js";
+import { normalizeDomain } from "./domain-utils.js";
 
-const STORAGE_KEY = "allowedDomains";
+const STORAGE_KEY = "cloudDomains";
+const LEGACY_KEY = "allowedDomains";
 
-let cached = new Set();
+let cached = {}; // { "example.com": { localAccess: true, cloudSync: "enabled" } }
 
-export { normalizeDomain, getOriginPatterns };
+export { normalizeDomain };
+
+// --- Init & Migration ---
+
+export async function init() {
+  const result = await chrome.storage.local.get([STORAGE_KEY, LEGACY_KEY]);
+
+  if (result[STORAGE_KEY]) {
+    cached = result[STORAGE_KEY].domains || {};
+  }
+
+  // Migrate from legacy whitelist (chrome.storage.sync)
+  if (Object.keys(cached).length === 0) {
+    const syncResult = await chrome.storage.sync.get(LEGACY_KEY);
+    const legacy = syncResult[LEGACY_KEY] || [];
+    if (legacy.length > 0) {
+      console.log("[whitelist] Migrating", legacy.length, "domains from legacy whitelist");
+      for (const domain of legacy) {
+        const d = normalizeDomain(domain);
+        if (d && !cached[d]) {
+          cached[d] = { localAccess: true, cloudSync: "enabled" };
+        }
+      }
+      await save();
+      await chrome.storage.sync.remove(LEGACY_KEY);
+      console.log("[whitelist] Migration complete");
+    }
+  }
+}
+
+// --- Queries ---
 
 export function isAllowed(domain) {
   if (!domain) return false;
   const d = normalizeDomain(domain);
   if (!d) return false;
-  return getDomainCandidates(d).some((candidate) => cached.has(candidate));
+  return getDomainCandidates(d).some((candidate) => {
+    const entry = cached[candidate];
+    return entry && entry.localAccess === true;
+  });
+}
+
+export function isCloudEnabled(domain) {
+  if (!domain) return false;
+  const d = normalizeDomain(domain);
+  if (!d) return false;
+  return getDomainCandidates(d).some((candidate) => {
+    const entry = cached[candidate];
+    return entry && entry.cloudSync === "enabled";
+  });
 }
 
 export function getAllowedDomains() {
-  return [...cached].sort();
+  return Object.keys(cached).sort();
 }
 
-export async function init() {
-  const result = await chrome.storage.sync.get(STORAGE_KEY);
-  cached = new Set(result[STORAGE_KEY] || []);
+export function getLocalAccessDomains() {
+  return Object.entries(cached)
+    .filter(([, v]) => v.localAccess)
+    .map(([k]) => k)
+    .sort();
 }
 
-export async function addDomain(domain) {
+export function getCloudEnabledDomains() {
+  return Object.entries(cached)
+    .filter(([, v]) => v.cloudSync === "enabled")
+    .map(([k]) => k)
+    .sort();
+}
+
+export function getPendingDomains() {
+  return Object.entries(cached)
+    .filter(([, v]) => v.cloudSync === "pending")
+    .map(([k]) => k)
+    .sort();
+}
+
+export function getDomainStatus(domain) {
+  const d = normalizeDomain(domain);
+  return cached[d] || null;
+}
+
+export function getAllDomainEntries() {
+  // Returns full entries for UI display
+  return Object.entries(cached)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([domain, entry]) => ({ domain, ...entry }));
+}
+
+// --- Mutations ---
+
+export async function addDomain(domain, options = {}) {
   const d = normalizeDomain(domain);
   if (!d) return { ok: false, error: "Invalid domain" };
-  if (cached.has(d)) return { ok: false, error: "Domain already allowed" };
-  cached.add(d);
+  if (cached[d]) return { ok: false, error: "Domain already exists" };
+
+  cached[d] = {
+    localAccess: options.localAccess !== undefined ? options.localAccess : true,
+    cloudSync: options.cloudSync || "enabled",
+  };
   await save();
   return { ok: true };
 }
 
-export async function removeDomain(domain, options = {}) {
+export async function removeDomain(domain) {
   const d = normalizeDomain(domain);
-  console.log("[cookie-sync] removeDomain called, domain:", domain, "normalized:", d);
   if (!d) return { ok: false, error: "Invalid domain" };
+  if (!cached[d]) return { ok: false, error: "Domain not found" };
 
-  cached.delete(d);
+  delete cached[d];
   await save();
-  if (options.skipPermissionRevoke) {
-    console.log("[cookie-sync] Domain removed from whitelist, permission revoke skipped by caller");
-    return { ok: true };
-  }
-
-  console.log("[cookie-sync] Domain removed from whitelist, revoking permissions...");
-
-  try {
-    const granted = (await chrome.permissions.getAll()).origins || [];
-    console.log("[cookie-sync] Granted origins:", JSON.stringify(granted));
-
-    const toRemove = findMatchingOrigins(granted, d);
-    console.log("[cookie-sync] Matched for removal:", JSON.stringify(toRemove));
-
-    if (toRemove.length > 0) {
-      const removed = await chrome.permissions.remove({ origins: toRemove });
-      console.log("[cookie-sync] chrome.permissions.remove returned:", removed);
-
-      let remaining = [];
-      for (let attempt = 0; attempt < 3; attempt++) {
-        remaining = findMatchingOrigins((await chrome.permissions.getAll()).origins || [], d);
-        console.log(`[cookie-sync] Verification attempt ${attempt + 1}:`, JSON.stringify(remaining));
-
-        if (remaining.length === 0) {
-          console.log("[cookie-sync] Permissions successfully revoked");
-          break;
-        }
-        if (attempt < 2) await delay(100);
-      }
-
-      if (remaining.length > 0) {
-        console.error("[cookie-sync] Failed to fully revoke permissions after retries");
-        return { ok: false, error: "Failed to revoke permissions. Please manually revoke in extension settings." };
-      }
-    } else {
-      console.log("[cookie-sync] No matching origins found to remove");
-    }
-
-    return { ok: true };
-  } catch (e) {
-    console.error("[cookie-sync] Failed to remove permissions:", e);
-    return { ok: false, error: e.message };
-  }
+  return { ok: true };
 }
 
+export async function setLocalAccess(domain, value) {
+  const d = normalizeDomain(domain);
+  if (!d || !cached[d]) return { ok: false, error: "Domain not found" };
+  cached[d].localAccess = !!value;
+  await save();
+  return { ok: true };
+}
+
+export async function setCloudSync(domain, status) {
+  const d = normalizeDomain(domain);
+  if (!d || !cached[d]) return { ok: false, error: "Domain not found" };
+  if (!["enabled", "pending", "disabled"].includes(status)) {
+    return { ok: false, error: "Invalid status" };
+  }
+  cached[d].cloudSync = status;
+  await save();
+  return { ok: true };
+}
+
+export async function addPendingDomains(domains) {
+  // Add domains from cloud that are not yet locally known
+  const added = [];
+  for (const domain of domains) {
+    const d = normalizeDomain(domain);
+    if (d && !cached[d]) {
+      cached[d] = { localAccess: false, cloudSync: "pending" };
+      added.push(d);
+    }
+  }
+  if (added.length > 0) await save();
+  return { ok: true, added };
+}
+
+export async function getDomainList() {
+  // Returns the list for cloud sync domain_list field
+  return Object.keys(cached).filter((d) => cached[d].cloudSync === "enabled").sort();
+}
+
+// --- Internal ---
+
 async function save() {
-  await chrome.storage.sync.set({ [STORAGE_KEY]: [...cached] });
+  await chrome.storage.local.set({ [STORAGE_KEY]: { domains: cached } });
 }
 
 function getDomainCandidates(domain) {
   const parts = domain.split(".");
   return parts.map((_, index) => parts.slice(index).join("."));
-}
-
-function extractHostFromOrigin(origin) {
-  const noScheme = origin.replace(/^[a-z]+:\/\//, "");
-  return noScheme.split("/")[0].replace(/^\*\./, "");
-}
-
-function findMatchingOrigins(origins, domain) {
-  return origins.filter((origin) => {
-    const host = extractHostFromOrigin(origin);
-    return host === domain || host.endsWith(`.${domain}`);
-  });
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

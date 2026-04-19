@@ -1,4 +1,4 @@
-// cookie-ops.js — Cookie read operations with whitelist validation
+// cookie-ops.js — Cookie read operations with domain access validation
 
 import * as whitelist from "./whitelist.js";
 
@@ -25,7 +25,7 @@ export async function handleGetCookies(params) {
 }
 
 export async function handleListAllowed() {
-  return { ok: true, data: whitelist.getAllowedDomains() };
+  return { ok: true, data: whitelist.getLocalAccessDomains() };
 }
 
 function serializeCookie(cookie) {
