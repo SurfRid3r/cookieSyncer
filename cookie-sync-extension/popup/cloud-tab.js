@@ -524,7 +524,7 @@ async function doSync(type, btnId) {
         successMsg += `，发现 ${resp.newDomains.length} 个新域名`;
       }
       if (msgArea) msgArea.innerHTML = `<div class="cloud-msg success">${successMsg}</div>`;
-      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); }, 2000);
+      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); document.dispatchEvent(new CustomEvent("domains-changed")); }, 2000);
     } else {
       btn.textContent = originalText;
       btn.disabled = false;
