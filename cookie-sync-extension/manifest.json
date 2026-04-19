@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cookie Sync",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Syncs browser cookies with a local daemon over WebSocket. User-controlled domain whitelist for security.",
   "permissions": [
     "cookies",
