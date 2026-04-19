@@ -1,6 +1,5 @@
 // cloud-tab.js — Cloud sync tab UI logic
 
-import { getOriginPatterns } from "../background/domain-utils.js";
 
 let cloudInitialized = false;
 let activeSection = null;
@@ -363,22 +362,6 @@ function bindSetupEvents(container) {
         filePath: document.getElementById("webdavPath").value || "/cookie-sync/cookies.enc",
       };
       if (!config.url || !config.username) { msg.innerHTML = '<div class="cloud-msg error">请填写必填字段</div>'; return; }
-      // Request host permission for WebDAV URL
-      try {
-        const webdavOrigin = new URL(config.url).origin;
-        const granted = await new Promise((resolve) => {
-          chrome.permissions.request({ origins: [webdavOrigin + "/*"] }, (result) => {
-            resolve(result !== false);
-          });
-        });
-        if (!granted) {
-          msg.innerHTML = '<div class="cloud-msg error">需要授予 WebDAV 服务器访问权限</div>';
-          return;
-        }
-      } catch (err) {
-        msg.innerHTML = `<div class="cloud-msg error">权限请求失败: ${err.message}</div>`;
-        return;
-      }
     }
     try {
       await sendMessage({ type: "cloudUpdateStorage", config: { type, config } });
@@ -537,14 +520,10 @@ async function doSync(type, btnId) {
       btn.textContent = "✓ 成功";
       let successMsg = "同步成功";
       if (resp.domains) successMsg += `，同步 ${resp.domains} 个域名`;
-      if (msgArea) msgArea.innerHTML = `<div class="cloud-msg success">${successMsg}</div>`;
-
-      // Handle skipped domains — request permissions here (user gesture available)
-      if (resp.skippedDomains?.length > 0 && type !== "cloudPush") {
-        await handleSkippedDomains(resp.skippedDomains, msgArea, btn, originalText, type);
-        return;
+      if (resp.newDomains?.length > 0) {
+        successMsg += `，发现 ${resp.newDomains.length} 个新域名`;
       }
-
+      if (msgArea) msgArea.innerHTML = `<div class="cloud-msg success">${successMsg}</div>`;
       setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); }, 2000);
     } else {
       btn.textContent = originalText;
@@ -559,39 +538,6 @@ async function doSync(type, btnId) {
   }
 }
 
-async function handleSkippedDomains(domains, msgArea, btn, originalText, syncType) {
-  const allPatterns = domains.flatMap((d) => getOriginPatterns(d));
-  const granted = await new Promise((resolve) => {
-    chrome.permissions.request({ origins: allPatterns }, (result) => {
-      resolve(result !== false);
-    });
-  });
-
-  if (granted) {
-    // Add domains to whitelist
-    await sendMessage({ type: "cloudAddDomains", domains });
-    document.dispatchEvent(new CustomEvent("domains-changed"));
-    // Re-sync to write the previously skipped cookies
-    if (msgArea) msgArea.innerHTML = '<div class="cloud-msg info">已授权新域名，正在重新同步...</div>';
-    btn.textContent = "同步中...";
-    try {
-      const resp2 = await sendMessage({ type: syncType });
-      if (resp2?.success) {
-        let msg = `同步完成，同步 ${resp2.domains || 0} 个域名`;
-        if (msgArea) msgArea.innerHTML = `<div class="cloud-msg success">${msg}</div>`;
-      } else if (msgArea) {
-        msgArea.innerHTML = `<div class="cloud-msg error">${resp2?.error || "重试失败"}</div>`;
-      }
-    } catch (err) {
-      if (msgArea) msgArea.innerHTML = `<div class="cloud-msg error">${err.message}</div>`;
-    }
-  } else {
-    if (msgArea) {
-      msgArea.innerHTML = `<div class="cloud-msg success">同步完成，跳过 ${domains.length} 个未授权域名: ${domains.join(", ")}</div>`;
-    }
-  }
-  setTimeout(() => { btn.textContent = originalText; btn.disabled = false; cloudInitialized = false; initCloudTab(); }, 2000);
-}
 
 async function loadSyncLog(container) {
   try {
