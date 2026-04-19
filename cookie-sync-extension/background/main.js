@@ -7,7 +7,7 @@ import * as cloudSync from "./cloud/sync-engine.js";
 
 let initialized = false;
 let initPromise = null;
-let pendingDomain = null;
+
 const popupHandlers = {
   getStatus: () => connection.getStatus(),
   popupOpened: async () => {
@@ -16,29 +16,23 @@ const popupHandlers = {
   },
   getDomains: async () => {
     await ensureReady();
-    return { domains: whitelist.getAllowedDomains() };
+    return { domains: whitelist.getAllowedDomains(), entries: whitelist.getAllDomainEntries() };
   },
-  pendingDomain: ({ domain }) => {
-    pendingDomain = domain;
-    return { ok: true };
-  },
-  confirmDomain: async ({ domain }) => {
+  addDomain: async ({ domain }) => {
     await ensureReady();
-    pendingDomain = null;
-    const result = await whitelist.addDomain(domain);
-    // Domain may already exist if onAdded handler added it first
-    if (!result.ok && result.error === "Domain already allowed") {
-      return { ok: true };
-    }
-    return result;
+    return whitelist.addDomain(domain);
   },
-  removeDomain: async ({ domain, skipPermissionRevoke }) => {
+  removeDomain: async ({ domain }) => {
     await ensureReady();
-    const result = await whitelist.removeDomain(domain, {
-      skipPermissionRevoke: skipPermissionRevoke === true,
-    });
-    console.log("[cookie-sync] removeDomain completed:", result);
-    return result;
+    return whitelist.removeDomain(domain);
+  },
+  setLocalAccess: async ({ domain, value }) => {
+    await ensureReady();
+    return whitelist.setLocalAccess(domain, value);
+  },
+  setCloudSync: async ({ domain, status }) => {
+    await ensureReady();
+    return whitelist.setCloudSync(domain, status);
   },
 
   // Cloud sync handlers
@@ -126,17 +120,6 @@ const popupHandlers = {
     console.log("[cloud-sync] cloudGetSyncLog returning", log.length, "entries");
     return { log };
   },
-  cloudAddDomains: async ({ domains }) => {
-    console.log("[cloud-sync] cloudAddDomains:", domains.join(", "));
-    await ensureReady();
-    const results = [];
-    for (const domain of domains) {
-      const r = await whitelist.addDomain(domain);
-      results.push({ domain, ...r });
-      console.log("[cloud-sync] addDomain", domain, "->", r.ok ? "ok" : r.error);
-    }
-    return { ok: true, results };
-  },
 };
 
 async function initialize() {
@@ -185,18 +168,6 @@ async function onDaemonMessage(cmd) {
   }
 }
 
-// --- Permission granted fallback (handles popup-closing during dialog) ---
-chrome.permissions.onAdded.addListener(async (permissions) => {
-  if (!pendingDomain) return;
-  await initialize();
-  const origins = permissions.origins || [];
-  const patterns = whitelist.getOriginPatterns(pendingDomain);
-  if (patterns.some((p) => origins.includes(p))) {
-    await whitelist.addDomain(pendingDomain).catch(() => {});
-    pendingDomain = null;
-  }
-});
-
 // --- Alarm: keep SW alive + reconnect ---
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "keepalive") {
@@ -222,7 +193,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })
     .catch((err) => {
       const error = err.message || String(err);
-      sendResponse(msg?.type === "getDomains" ? { domains: [], error } : { ok: false, error });
+      sendResponse(msg?.type === "getDomains" ? { domains: [], entries: [], error } : { ok: false, error });
     });
   return msg?.type !== "getStatus";
 });
