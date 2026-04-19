@@ -270,7 +270,7 @@ async function handleSyncError(err) {
       console.error("[cloud-sync] Failed to disable alarm after auth failure:", e);
     }
   }
-  config.addSyncLogEntry({
+  await config.addSyncLogEntry({
     time: Date.now(),
     action: config.get().mode,
     status: "error",
