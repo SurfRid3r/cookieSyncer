@@ -228,14 +228,11 @@ async function setupAlarm() {
   const cfg = config.get();
 
   if (!cfg.scheduleEnabled) {
-    chrome.alarms.onAlarm.removeListener(handleAlarm);
     await chrome.alarms.clear(ALARM_NAME);
     return;
   }
 
   const interval = Math.max(MIN_INTERVAL, cfg.scheduleIntervalMinutes);
-  chrome.alarms.onAlarm.removeListener(handleAlarm);
-  chrome.alarms.onAlarm.addListener(handleAlarm);
 
   // Only recreate the alarm if it doesn't exist or the period changed.
   // Unconditional clear+create would reset the countdown on every SW restart.
@@ -254,11 +251,6 @@ export function triggerScheduledSync() {
   if (mode === "push-only") push().catch(handleSyncError);
   else if (mode === "pull-only") pull().catch(handleSyncError);
   else sync().catch(handleSyncError);
-}
-
-function handleAlarm(alarm) {
-  if (alarm.name !== ALARM_NAME) return;
-  triggerScheduledSync();
 }
 
 async function handleSyncError(err) {
