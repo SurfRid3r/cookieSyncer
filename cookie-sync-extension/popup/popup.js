@@ -157,7 +157,7 @@ function renderDomainList() {
         <div class="subdomain-item" data-domain="${escapeHtml(entry.domain)}">
           <span class="domain-name">${escapeHtml(entry.domain)}</span>
           <div class="domain-controls">
-            <button class="toggle-btn ${localClass}" data-action="local" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="允许本地 daemon 获取此域名 cookie">${localText}</button>
+            <span class="badge ${localClass}" data-action="local" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="允许本地 daemon 获取此域名 cookie">${localText}</span>
             <span class="badge ${cloudClass}" data-action="${cloudAction}" data-domain="${escapeHtml(entry.domain)}" title="点击切换云端同步">${cloudText}</span>
             <button class="remove-btn" data-action="remove" data-group-idx="${groupIdx}" data-domain-idx="${domainIdx}" title="删除">x</button>
           </div>
@@ -185,10 +185,10 @@ function renderDomainList() {
       render();
     });
   });
-  domainList.querySelectorAll("button[data-action='local']").forEach((btn) => {
-    btn.addEventListener("click", (e) => handleToggleLocal(e, btn, pageGroups));
+  domainList.querySelectorAll("[data-action='local']").forEach((el) => {
+    el.addEventListener("click", (e) => handleToggleLocal(e, el, pageGroups));
   });
-  domainList.querySelectorAll("button[data-action='remove']").forEach((btn) => {
+  domainList.querySelectorAll("[data-action='remove']").forEach((btn) => {
     btn.addEventListener("click", (e) => handleRemoveDomain(e, btn, pageGroups));
   });
   domainList.querySelectorAll(".badge[data-action='enable-cloud']").forEach((badge) => {
