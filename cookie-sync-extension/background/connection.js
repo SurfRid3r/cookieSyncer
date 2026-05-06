@@ -1,6 +1,6 @@
 // connection.js — WebSocket lifecycle management
 
-const DAEMON_PORT = 19825;
+const DAEMON_PORT = 38247;
 const DAEMON_HOST = "localhost";
 const DAEMON_WS_URL = `ws://${DAEMON_HOST}:${DAEMON_PORT}/ext`;
 const DAEMON_PING_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}/ping`;

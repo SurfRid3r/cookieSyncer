@@ -7,7 +7,7 @@ Retrieve browser cookies from the command line via a Chrome extension + local da
 ## Architecture
 
 ```
-Chrome Extension  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
+Chrome Extension  ←──WebSocket (localhost:38247)──→  cookie_sync_daemon.py
    │                                                     │
    ├─ Domain management (local + cloud)                   ├─ CLI output
    ├─ Cookie capture & filtering                          └─ Cookie Header

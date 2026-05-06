@@ -5,7 +5,7 @@
 ## 架构
 
 ```
-Chrome 扩展  ←──WebSocket (localhost:19825)──→  cookie_sync_daemon.py
+Chrome 扩展  ←──WebSocket (localhost:38247)──→  cookie_sync_daemon.py
    │                                                  │
    ├─ 域名管理（本地获取 + 云端同步）                    ├─ CLI 输出
    ├─ Cookie 捕获与过滤                                └─ Cookie Header

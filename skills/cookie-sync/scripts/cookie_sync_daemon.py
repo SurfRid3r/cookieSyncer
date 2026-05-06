@@ -15,7 +15,7 @@ from websockets.asyncio.server import serve
 from websockets.sync.client import connect as ws_connect
 
 HOST = "localhost"
-PORT = 19825
+PORT = 38247
 EXT_WAIT_TIMEOUT = 65  # slightly longer than extension's max reconnect interval (60s)
 
 
