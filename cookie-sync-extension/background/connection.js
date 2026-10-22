@@ -1,159 +1,155 @@
-// connection.js — WebSocket lifecycle management
+// connection.js — WebSocket lifecycle and Cookie Sync protocol negotiation.
 
-const DAEMON_PORT = 38247;
-const DAEMON_HOST = "localhost";
-const DAEMON_WS_URL = `ws://${DAEMON_HOST}:${DAEMON_PORT}/ext`;
-const DAEMON_PING_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}/ping`;
+export const PROTOCOL = 1;
+const SERVICE = "cookie-sync";
+const SUBPROTOCOL = "cookie-sync-v1";
+const CAPABILITIES = ["domain", "url"];
+const DAEMON_WS_URL = "ws://localhost:38247/ext";
+const DAEMON_PING_URL = "http://localhost:38247/ping";
 const WS_RECONNECT_BASE_DELAY = 2000;
 const WS_RECONNECT_MAX_DELAY = 60000;
 const MAX_EAGER_ATTEMPTS = 6;
 const DAEMON_PING_TIMEOUT_MS = 1000;
 
 let ws = null;
+let ready = false;
+let connecting = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let onMessageHandler = null;
 
-/**
- * Initialize connection with a message handler.
- */
 export function init(handler) {
   onMessageHandler = handler;
-  connect({ resetBackoff: true });
+  return connect({ resetBackoff: true });
 }
 
-/**
- * Send a JSON message over WebSocket.
- */
 export function send(msg) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    try {
-      ws.send(JSON.stringify(msg));
-    } catch (err) {
-      console.error("[cookie-sync] Failed to send message:", err);
-      scheduleReconnect();
-    }
+  return sendOn(ws, msg);
+}
+
+function sendOn(socket, msg) {
+  if (socket !== ws || !ready || socket?.readyState !== WebSocket.OPEN) return false;
+  try {
+    socket.send(JSON.stringify(msg));
+    return true;
+  } catch {
+    socket.close();
+    return false;
   }
 }
 
-/**
- * Get current connection status.
- */
 export function getStatus() {
   return {
-    connected: ws?.readyState === WebSocket.OPEN,
-    reconnecting: reconnectTimer !== null,
+    connected: ready && ws?.readyState === WebSocket.OPEN,
+    reconnecting: reconnectTimer !== null || connecting,
   };
 }
 
-/**
- * Attempt connection (called by keepalive alarm).
- */
 export function tryConnect() {
-  connect();
+  return connect();
 }
 
-/**
- * Restart the short-term reconnect window from the beginning.
- */
 export function restartShortRetryWindow() {
   resetReconnectState();
-  connect({ resetBackoff: true });
+  return connect({ resetBackoff: true });
 }
 
 async function connect({ resetBackoff = false } = {}) {
-  const wsState = ws?.readyState;
-  if (wsState === WebSocket.OPEN || wsState === WebSocket.CONNECTING) return;
-
-  if (resetBackoff) {
-    resetReconnectState();
-  }
-
-  const daemonReachable = await pingDaemon();
-  if (!daemonReachable) {
-    scheduleReconnect();
-    return;
-  }
-
+  if (connecting || ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+  // This guard covers the asynchronous HTTP ping as well as socket creation.
+  connecting = true;
   try {
-    ws = new WebSocket(DAEMON_WS_URL);
-  } catch (err) {
-    console.warn("[cookie-sync] Failed to create daemon WebSocket:", err);
-    ws = null;
-    scheduleReconnect();
-    return;
-  }
-
-  ws.onopen = () => {
-    console.log("[cookie-sync] Connected to daemon");
-    resetReconnectState();
-    sendHello();
-  };
-
-  ws.onmessage = async (event) => {
-    try {
-      const command = JSON.parse(event.data);
-      if (onMessageHandler) {
-        const result = await onMessageHandler(command);
-        send(result);
-      }
-    } catch (err) {
-      console.error("[cookie-sync] Message handling error:", err);
+    if (resetBackoff) resetReconnectState();
+    if (!await pingDaemon()) {
+      scheduleReconnect();
+      return;
     }
-  };
+    if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+    const socket = new WebSocket(DAEMON_WS_URL, SUBPROTOCOL);
+    ws = socket;
+    ready = false;
+    const helloTimer = setTimeout(() => socket.close(), 2000);
 
-  ws.onclose = () => {
-    console.log("[cookie-sync] Disconnected from daemon");
-    ws = null;
+    socket.onopen = () => {
+      if (ws !== socket) { socket.close(); return; }
+      try {
+        socket.send(JSON.stringify({
+          type: "hello", role: "extension", service: SERVICE,
+          protocol: PROTOCOL, capabilities: CAPABILITIES,
+        }));
+      } catch {
+        socket.close();
+      }
+    };
+    socket.onmessage = async (event) => {
+      if (ws !== socket) return;
+      try {
+        const command = JSON.parse(event.data);
+        if (command.type === "hello") {
+          if (!matchesService(command) || command.role !== "service") throw new Error();
+          clearTimeout(helloTimer);
+          ready = true;
+          resetReconnectState();
+          return;
+        }
+        if (!ready || command.protocol !== PROTOCOL || typeof command.id !== "string"
+            || command.action !== "getCookies") throw new Error();
+        if (onMessageHandler) {
+          const result = await onMessageHandler(command);
+          // A slow response on an old socket cannot be sent on its replacement.
+          sendOn(socket, result);
+        }
+      } catch {
+        console.warn("[cookie-sync] Protocol or request handling failed");
+        socket.close(1002, "Protocol error");
+      }
+    };
+    socket.onclose = () => {
+      clearTimeout(helloTimer);
+      if (ws !== socket) return;
+      ws = null;
+      ready = false;
+      scheduleReconnect();
+    };
+    socket.onerror = () => {
+      // Close this socket, never whichever socket happens to be current later.
+      socket.close();
+    };
+  } catch {
     scheduleReconnect();
-  };
-
-  ws.onerror = (event) => {
-    console.warn("[cookie-sync] WebSocket error event:", event);
-    ws?.close();
-  };
+  } finally {
+    connecting = false;
+  }
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return;
-
+  if (reconnectTimer !== null) return;
   const attempt = reconnectAttempts;
-  if (reconnectAttempts < MAX_EAGER_ATTEMPTS) {
-    reconnectAttempts++;
-  }
-  const delay = Math.min(WS_RECONNECT_BASE_DELAY * Math.pow(2, attempt), WS_RECONNECT_MAX_DELAY);
-
+  if (reconnectAttempts < MAX_EAGER_ATTEMPTS) reconnectAttempts++;
+  const delay = Math.min(WS_RECONNECT_BASE_DELAY * 2 ** attempt, WS_RECONNECT_MAX_DELAY);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    connect();
+    void connect();
   }, delay);
 }
 
 function resetReconnectState() {
   reconnectAttempts = 0;
-  clearReconnectTimer();
-}
-
-function clearReconnectTimer() {
-  if (!reconnectTimer) return;
-  clearTimeout(reconnectTimer);
+  if (reconnectTimer !== null) clearTimeout(reconnectTimer);
   reconnectTimer = null;
 }
 
-function sendHello() {
-  ws?.send(JSON.stringify({
-    type: "hello",
-    version: chrome.runtime.getManifest().version,
-  }));
+function matchesService(data) {
+  return data?.service === SERVICE && data.protocol === PROTOCOL
+    && Array.isArray(data.capabilities) && CAPABILITIES.every((c) => data.capabilities.includes(c));
 }
 
 async function pingDaemon() {
   try {
     const response = await fetch(DAEMON_PING_URL, {
-      signal: AbortSignal.timeout(DAEMON_PING_TIMEOUT_MS),
-      cache: "no-store",
+      signal: AbortSignal.timeout(DAEMON_PING_TIMEOUT_MS), cache: "no-store",
     });
-    return response.ok;
+    return response.ok && matchesService(await response.json());
   } catch {
     return false;
   }

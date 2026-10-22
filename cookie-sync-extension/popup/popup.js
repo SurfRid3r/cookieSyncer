@@ -21,6 +21,7 @@ const PAGE_SIZE = 5;
 
 const dot = document.getElementById("dot");
 const status = document.getElementById("status");
+const statusHint = document.getElementById("statusHint");
 const domainInput = document.getElementById("domainInput");
 const addBtn = document.getElementById("addBtn");
 const domainError = document.getElementById("domainError");
@@ -33,10 +34,12 @@ let currentPage = 1;
 let expandedGroups = new Set();
 let isAddingDomain = false;
 let statusPollTimer = null;
-const STATUS_HTML = {
-  connected: "<strong>已连接 daemon</strong>",
-  connecting: "<strong>重连中...</strong>",
-  disconnected: "<strong>未连接 daemon</strong>",
+let statusRequestInFlight = false;
+let statusDisposed = false;
+const STATUS = {
+  connected: { text: "已接入", hint: "本地通道已就绪" },
+  standby: { text: "待命", hint: "有本地请求时自动接入" },
+  unavailable: { text: "状态暂不可用", hint: "稍后自动刷新" },
 };
 
 function escapeHtml(str) {
@@ -47,13 +50,14 @@ function escapeHtml(str) {
 
 function setStatus(state) {
   dot.className = `dot ${state}`;
-  status.innerHTML = STATUS_HTML[state];
+  // Avoid repeatedly announcing identical status text to assistive technology.
+  if (status.textContent !== STATUS[state].text) status.textContent = STATUS[state].text;
+  if (statusHint.textContent !== STATUS[state].hint) statusHint.textContent = STATUS[state].hint;
 }
 
 function setConnectionStatus(resp) {
-  if (resp?.connected) setStatus("connected");
-  else if (resp?.reconnecting) setStatus("connecting");
-  else setStatus("disconnected");
+  if (typeof resp?.connected !== "boolean") setStatus("unavailable");
+  else setStatus(resp.connected ? "connected" : "standby");
 }
 
 function sendMessage(message) {
@@ -70,25 +74,45 @@ function sendMessage(message) {
 
 // --- Init ---
 notifyPopupOpened();
+syncStatusPolling();
 refreshDomains();
 document.addEventListener("domains-changed", () => refreshDomains());
+document.addEventListener("visibilitychange", () => {
+  syncStatusPolling();
+  if (!document.hidden) refreshStatus();
+});
+window.addEventListener("pagehide", () => {
+  statusDisposed = true;
+  stopStatusPolling();
+});
 
 function refreshStatus() {
-  sendMessage({ type: "getStatus" })
-    .then((resp) => { setConnectionStatus(resp); syncStatusPolling(resp); })
-    .catch(() => { stopStatusPolling(); setStatus("disconnected"); });
+  return requestConnectionStatus("getStatus");
 }
 
 function notifyPopupOpened() {
-  sendMessage({ type: "popupOpened" })
-    .then((resp) => { setConnectionStatus(resp); syncStatusPolling(resp); })
-    .catch(() => refreshStatus());
+  return requestConnectionStatus("popupOpened");
 }
 
-function syncStatusPolling(resp) {
-  if (resp?.connected || !resp?.reconnecting) { stopStatusPolling(); return; }
+function requestConnectionStatus(type) {
+  if (statusDisposed || document.hidden || statusRequestInFlight) return;
+  statusRequestInFlight = true;
+  return sendMessage({ type })
+    .then((resp) => {
+      if (!statusDisposed && !document.hidden) setConnectionStatus(resp);
+    })
+    .catch(() => {
+      if (!statusDisposed && !document.hidden) setStatus("unavailable");
+    })
+    .finally(() => { statusRequestInFlight = false; });
+}
+
+function syncStatusPolling() {
+  if (statusDisposed || document.hidden) { stopStatusPolling(); return; }
   if (statusPollTimer !== null) return;
-  statusPollTimer = window.setInterval(() => refreshStatus(), 1000);
+  // Read cached UI state only; this doesn't create a CLI request or hold the
+  // local service alive. Keep observing after connection so idle exit is shown.
+  statusPollTimer = window.setInterval(refreshStatus, 1000);
 }
 
 function stopStatusPolling() {

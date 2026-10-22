@@ -130,7 +130,8 @@ async function initialize() {
     await whitelist.init();
     connection.init(onDaemonMessage);
     await cloudSync.init();
-    chrome.alarms.create("keepalive", { periodInMinutes: 0.4 });
+    // Packaged Chrome extensions require a period of at least 30 seconds.
+    chrome.alarms.create("keepalive", { periodInMinutes: 0.5 });
     console.log("[cookie-sync] Extension initialized");
     initialized = true;
   })().catch((err) => {
@@ -152,19 +153,16 @@ async function ensureReady(options = {}) {
 // --- Daemon command handler ---
 async function onDaemonMessage(cmd) {
   const id = cmd.id;
+  const protocol = connection.PROTOCOL;
   try {
     switch (cmd.action) {
       case "getCookies":
-        return { id, ...await cookieOps.handleGetCookies(cmd) };
-      case "listAllowed":
-        return { id, ...await cookieOps.handleListAllowed() };
-      case "ping":
-        return { id, ok: true, data: { pong: true } };
+        return { id, protocol, ...await cookieOps.handleGetCookies(cmd) };
       default:
-        return { id, ok: false, error: `Unknown action: ${cmd.action}` };
+        return { id, protocol, ok: false, error_code: "PROTOCOL_ERROR" };
     }
-  } catch (err) {
-    return { id, ok: false, error: err.message || String(err) };
+  } catch {
+    return { id, protocol, ok: false, error_code: "COOKIE_READ_FAILED" };
   }
 }
 

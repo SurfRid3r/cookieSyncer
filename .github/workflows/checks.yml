@@ -1,0 +1,28 @@
+name: Offline checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.15'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the existing runtime dependency
+        run: python3 -m pip install websockets==17.2
+      - name: Python offline contracts and isolated loopback
+        run: python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Extension offline behavior
+        run: node --experimental-default-type=module --test tests/*.test.mjs

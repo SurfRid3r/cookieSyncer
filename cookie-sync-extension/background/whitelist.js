@@ -43,34 +43,26 @@ export async function init() {
 // --- Queries ---
 
 export function isAllowed(domain) {
-  if (!domain) return false;
-  const d = normalizeDomain(domain);
-  if (!d) return false;
-  return getDomainCandidates(d).some((candidate) => {
-    const entry = cached[candidate];
-    return entry && entry.localAccess === true;
-  });
+  return resolveEntry(domain)?.localAccess === true;
 }
 
 export function isCloudEnabled(domain) {
-  if (!domain) return false;
+  return resolveEntry(domain)?.cloudSync === "enabled";
+}
+
+// The closest configured entry wins, including explicit OFF / pending.
+// Each switch is evaluated independently on that same entry.
+function resolveEntry(domain) {
   const d = normalizeDomain(domain);
-  if (!d) return false;
-  return getDomainCandidates(d).some((candidate) => {
-    const entry = cached[candidate];
-    return entry && entry.cloudSync === "enabled";
-  });
+  if (!d) return null;
+  for (const candidate of getDomainCandidates(d)) {
+    if (Object.hasOwn(cached, candidate)) return cached[candidate];
+  }
+  return null;
 }
 
 export function getAllowedDomains() {
   return Object.keys(cached).sort();
-}
-
-export function getLocalAccessDomains() {
-  return Object.entries(cached)
-    .filter(([, v]) => v.localAccess)
-    .map(([k]) => k)
-    .sort();
 }
 
 export function getCloudEnabledDomains() {
@@ -169,6 +161,7 @@ async function save() {
 }
 
 function getDomainCandidates(domain) {
+  if (domain.includes(":") || /^\d+(\.\d+){3}$/.test(domain)) return [domain];
   const parts = domain.split(".");
   return parts.map((_, index) => parts.slice(index).join("."));
 }

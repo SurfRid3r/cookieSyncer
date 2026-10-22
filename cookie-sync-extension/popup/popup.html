@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html {
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    /* Expanded settings still scroll, without a scrollbar gutter shifting the popup. */
+    html, body { scrollbar-width: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
     body {
       width: 320px;
       min-height: 200px;
@@ -15,11 +22,11 @@
     .header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       padding: 12px 16px 0;
     }
-    .header img { width: 24px; height: 24px; }
-    .header h1 { font-size: 15px; font-weight: 600; }
+    .header img { width: 20px; height: 20px; }
+    .header h1 { font-size: 13px; font-weight: 600; }
     .tab-bar {
       display: flex;
       border-bottom: 1px solid #e0e0e0;
@@ -48,17 +55,17 @@
     .status-row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      border-radius: 8px;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 6px;
       background: #f5f5f5;
+      line-height: 16px;
     }
-    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .dot.connected { background: #34c759; }
-    .dot.disconnected { background: #ff3b30; }
-    .dot.connecting { background: #ff9500; }
-    .status-text { font-size: 13px; color: #555; }
-    .status-text strong { color: #333; }
+    .dot.standby, .dot.unavailable { background: #999; }
+    .status-text { font-size: 12px; font-weight: 400; color: #555; }
+    .status-hint { margin-left: auto; font-size: 11px; color: #888; }
     .domain-section { margin-top: 14px; }
     .domain-section h2 { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 8px; }
     .domain-input-row { display: flex; gap: 6px; }
@@ -155,9 +162,10 @@
     <button class="tab-btn" data-tab="cloud">☁️ 云同步</button>
   </div>
   <div class="tab-content active" id="tab-domains">
-    <div class="status-row">
-      <span class="dot disconnected" id="dot"></span>
-      <span class="status-text" id="status">Checking...</span>
+    <div class="status-row" role="status" aria-live="polite" aria-atomic="true">
+      <span class="dot standby" id="dot" aria-hidden="true"></span>
+      <span class="status-text" id="status">待命</span>
+      <span class="status-hint" id="statusHint">有本地请求时自动接入</span>
     </div>
     <div class="domain-section">
       <h2>域名管理</h2>

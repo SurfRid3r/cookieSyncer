@@ -1,175 +1,267 @@
-"""
-Cookie Sync — One-shot tool to fetch browser cookies via WebSocket daemon.
+"""Fetch one Cookie Header as JSONL, then close the temporary local listener."""
 
-Usage:
-  pip install websockets
-  python cookie_sync_daemon.py example.com           # cookie header format
-  python cookie_sync_daemon.py --list                 # list whitelisted domains
-"""
-
+import argparse
 import asyncio
+import ipaddress
 import json
+import math
+import os
+import re
 import sys
-import urllib.request
-from websockets.asyncio.server import serve
-from websockets.sync.client import connect as ws_connect
+import urllib.parse
 
-HOST = "localhost"
+HOST = "127.0.0.1"
 PORT = 38247
-EXT_WAIT_TIMEOUT = 65  # slightly longer than extension's max reconnect interval (60s)
+SERVICE = "cookie-sync"
+PROTOCOL = 1
+SUBPROTOCOL = "cookie-sync-v1"
+CAPABILITIES = ["domain", "url"]
+DEFAULT_TIMEOUT = 85.0
+MAX_TIMEOUT = 300.0
+EXT_ORIGIN = re.compile(r"chrome-extension://[a-p]{32}")
+
+ERRORS = {
+    "USAGE_ERROR": ("Invalid arguments; run --help for usage.", False, 2),
+    "DEPENDENCY_MISSING": ("Install websockets 17.2 for this python3 interpreter.", False, 1),
+    "SERVICE_MISMATCH": ("The connected peer is not Cookie Sync.", False, 1),
+    "PROTOCOL_MISMATCH": ("Update the script and extension together; protocol or capabilities differ.", False, 1),
+    "PROTOCOL_ERROR": ("The local peer sent an invalid message.", False, 1),
+    "LOCAL_UNAVAILABLE": ("Cannot open the local listener; another request or service may be using the port.", True, 1),
+    "EXTENSION_UNAVAILABLE": ("Open Chrome and enable the matching Cookie Sync extension.", False, 1),
+    "EXTENSION_DISCONNECTED": ("The browser extension disconnected during the request.", True, 1),
+    "TIMEOUT": ("The request deadline expired.", True, 1),
+    "DOMAIN_NOT_ALLOWED": ("Enable local access for the target in the extension.", False, 1),
+    "COOKIE_EMPTY": ("No cookies matched the authorized scope.", False, 1),
+    "COOKIE_READ_FAILED": ("Chrome could not read cookies for the authorized scope.", False, 1),
+    "INTERNAL_ERROR": ("Cookie Sync could not complete the request.", False, 1),
+}
 
 
-def build_request(action, domain=None):
-    req = {"id": "1", "action": action}
-    if domain:
-        req["domain"] = domain
-    return req
+class CookieSyncError(Exception):
+    def __init__(self, code):
+        self.code = code if isinstance(code, str) and code in ERRORS else "PROTOCOL_ERROR"
+        self.message, self.retryable, self.exit_code = ERRORS[self.code]
+        super().__init__(self.message)
+
+    def record(self):
+        return {"error_code": self.code, "message": self.message, "retryable": self.retryable}
 
 
-def ping_daemon():
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse's original message may include a URL containing secrets.
+        raise CookieSyncError("USAGE_ERROR")
+
+
+def positive_seconds(value):
     try:
-        with urllib.request.urlopen(f"http://{HOST}:{PORT}/ping", timeout=2) as r:
-            return r.status == 200
-    except Exception:
-        return False
+        seconds = float(value)
+        if not math.isfinite(seconds) or not 0 < seconds <= MAX_TIMEOUT:
+            raise ValueError
+        return seconds
+    except (TypeError, ValueError):
+        raise CookieSyncError("USAGE_ERROR") from None
 
 
-def fetch_via_running_daemon(domain=None, action="getCookies"):
-    with ws_connect(f"ws://{HOST}:{PORT}/client") as ws:
-        ws.send(json.dumps(build_request(action, domain)))
-        return json.loads(ws.recv())
+def normalize_domain(value):
+    try:
+        value = value.lstrip(".")
+        if not value or any(c.isspace() or ord(c) < 32 for c in value):
+            raise ValueError
+        try:
+            address = ipaddress.ip_address(value.strip("[]"))
+            return f"[{address}]" if address.version == 6 else str(address)
+        except ValueError:
+            pass
+        parsed = urllib.parse.urlsplit("http://" + value)
+        if (not parsed.hostname or parsed.username is not None or parsed.password is not None
+                or parsed.port is not None or parsed.path or parsed.query or parsed.fragment
+                or any(c in value for c in "%*\\")):
+            raise ValueError
+        # Chrome's native URL parser owns IDN canonicalization. Python's built-in
+        # IDNA codec uses different rules and could change the requested host.
+        return parsed.hostname.rstrip(".")
+    except (ValueError, UnicodeError):
+        raise CookieSyncError("USAGE_ERROR") from None
 
 
-# --- Temporary server mode (when no daemon is running) ---
+def normalize_url(value):
+    try:
+        if any(c.isspace() or ord(c) < 32 for c in value) or "\\" in value:
+            raise ValueError
+        parsed = urllib.parse.urlsplit(value)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None):
+            raise ValueError
+        host = normalize_domain(parsed.hostname)
+        if ":" in host and not host.startswith("["):
+            host = "[" + host + "]"
+        if parsed.port is not None:
+            host += ":" + str(parsed.port)
+        return urllib.parse.urlunsplit((parsed.scheme, host, parsed.path or "/", parsed.query, ""))
+    except (ValueError, UnicodeError):
+        raise CookieSyncError("USAGE_ERROR") from None
 
-ext_connection = None
-got_response = None
+
+def parse_args(argv=None):
+    parser = Parser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("domain", nargs="?", help="domain-wide Cookie query")
+    parser.add_argument("--url", help="HTTP(S) URL; Chrome matches protocol, host and path")
+    parser.add_argument("--timeout", type=positive_seconds, default=DEFAULT_TIMEOUT,
+                        help="total deadline in seconds (default: 85; maximum: 300)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="write JSONL connection progress to stderr")
+    args = parser.parse_args(argv)
+    if (args.domain is None) == (args.url is None):
+        parser.error("choose one mode")
+    try:
+        args.port = int(os.environ.get("COOKIE_SYNC_PORT", PORT))
+        if not 1 <= args.port <= 65535:
+            raise ValueError
+    except ValueError:
+        parser.error("invalid local port")
+    if args.domain is not None:
+        args.domain = normalize_domain(args.domain)
+    if args.url is not None:
+        args.url = normalize_url(args.url)
+    return args
 
 
-async def handle_connection(websocket):
-    path = getattr(getattr(websocket, "request", None), "path", None) or getattr(websocket, "path", None)
-
-    if path == "/ext":
-        await handle_ext(websocket)
-    elif path == "/client":
-        await handle_client(websocket)
-    else:
-        await websocket.close()
+def identity(role=None):
+    result = {"service": SERVICE, "protocol": PROTOCOL, "capabilities": CAPABILITIES}
+    if role:
+        result.update(type="hello", role=role)
+    return result
 
 
-async def handle_ext(websocket):
-    global ext_connection, got_response
-    ext_connection = websocket
-    print("[cookie-sync] Extension connected", file=sys.stderr)
+def check_identity(data, role=None):
+    if not isinstance(data, dict) or data.get("service") != SERVICE:
+        raise CookieSyncError("SERVICE_MISMATCH")
+    if (type(data.get("protocol")) is not int or data["protocol"] != PROTOCOL
+            or not isinstance(data.get("capabilities"), list)
+            or not set(CAPABILITIES).issubset(str(c) for c in data["capabilities"])
+            or (role is not None and (data.get("type") != "hello" or data.get("role") != role))):
+        raise CookieSyncError("PROTOCOL_MISMATCH")
+
+
+def decode_message(raw):
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError
+        return data
+    except (ValueError, TypeError, UnicodeError):
+        raise CookieSyncError("PROTOCOL_ERROR") from None
+
+
+async def fetch(args):
+    # Import only for retrieval so --help works without the runtime dependency.
+    from websockets.asyncio.server import serve
+    from websockets.exceptions import ConnectionClosed
+
+    result = asyncio.get_running_loop().create_future()
+    claimed = False
+    request = {"id": "1", "protocol": PROTOCOL, "action": "getCookies"}
+    if args.domain is not None:
+        request["domain"] = args.domain
+    if args.url is not None:
+        request["url"] = args.url
+
+    def process_request(connection, incoming):
+        try:
+            origin = incoming.headers.get("Origin")
+            if incoming.headers.get("Host") not in (f"localhost:{args.port}", f"{HOST}:{args.port}"):
+                return connection.respond(403, "Local Host required\n")
+            extension_origin = origin is not None and EXT_ORIGIN.fullmatch(origin) is not None
+            if origin is not None and not extension_origin:
+                return connection.respond(403, "Origin rejected\n")
+            if incoming.path == "/ping":
+                response = connection.respond(200, json.dumps(identity()) + "\n")
+                response.headers["Content-Type"] = "application/json"
+                return response
+            if incoming.path != "/ext":
+                return connection.respond(404, "Unknown entry\n")
+            if not extension_origin:
+                return connection.respond(403, "Extension Origin required\n")
+        except (ValueError, KeyError):
+            return connection.respond(400, "Invalid headers\n")
+
+    async def handle_extension(ws):
+        nonlocal claimed
+        if claimed:
+            await ws.close(1013, "Request already active")
+            return
+        claimed = True
+        try:
+            check_identity(decode_message(await ws.recv()), "extension")
+            await ws.send(json.dumps(identity("service")))
+            if args.verbose:
+                print(json.dumps({"event": "extension_connected"}), file=sys.stderr)
+            await ws.send(json.dumps(request))
+            reply = decode_message(await ws.recv())
+            if type(reply.get("protocol")) is not int or reply["protocol"] != PROTOCOL:
+                raise CookieSyncError("PROTOCOL_MISMATCH")
+            if reply.get("id") != request["id"] or type(reply.get("ok")) is not bool:
+                raise CookieSyncError("PROTOCOL_ERROR")
+            if not reply["ok"]:
+                raise CookieSyncError(reply.get("error_code"))
+            if not result.done():
+                result.set_result(reply)
+        except (CookieSyncError, ConnectionClosed) as exc:
+            error = exc if isinstance(exc, CookieSyncError) else CookieSyncError("EXTENSION_DISCONNECTED")
+            if not result.done():
+                result.set_exception(error)
 
     try:
-        async for message in websocket:
-            data = json.loads(message)
-            if data.get("type") == "hello":
-                continue
-            if data.get("id") == "1" and got_response is None:
-                got_response = data
-    except Exception:
-        pass
-    finally:
-        ext_connection = None
+        async with asyncio.timeout(args.timeout):
+            async with serve(handle_extension, HOST, args.port, process_request=process_request,
+                             origins=[EXT_ORIGIN], subprotocols=[SUBPROTOCOL],
+                             open_timeout=2, close_timeout=0.2, max_size=1024 * 1024):
+                if args.verbose:
+                    print(json.dumps({"event": "waiting_extension"}), file=sys.stderr)
+                return await result
+    except TimeoutError:
+        raise CookieSyncError("TIMEOUT" if claimed else "EXTENSION_UNAVAILABLE") from None
 
 
-async def handle_client(websocket):
-    global got_response
+def format_jsonl(result):
+    data = result.get("data")
+    if not isinstance(data, list):
+        raise CookieSyncError("PROTOCOL_ERROR")
+    if not data:
+        raise CookieSyncError("COOKIE_EMPTY")
+    pairs = []
+    for cookie in data:
+        if not isinstance(cookie, dict):
+            raise CookieSyncError("PROTOCOL_ERROR")
+        name, value = cookie.get("name"), cookie.get("value")
+        if (not isinstance(name, str) or not isinstance(value, str)
+                or any(ord(c) < 32 or ord(c) == 127 for c in name + value)):
+            raise CookieSyncError("PROTOCOL_ERROR")
+        pairs.append(f"{name}={value}")
+    return json.dumps({"cookie_header": "; ".join(pairs)}, ensure_ascii=False)
+
+
+def main(argv=None):
     try:
-        async for message in websocket:
-            data = json.loads(message)
-            req_id = data.get("id")
-            if ext_connection is None:
-                got_response = {"id": req_id, "ok": False, "error": "No browser extension connected"}
-                await websocket.send(json.dumps(got_response))
-                continue
-            try:
-                await ext_connection.send(message)
-            except Exception as e:
-                got_response = {"id": req_id, "ok": False, "error": str(e)}
-                await websocket.send(json.dumps(got_response))
+        args = parse_args(argv)
+        print(format_jsonl(asyncio.run(fetch(args))))
+        return 0
+    except CookieSyncError as exc:
+        print(json.dumps(exc.record()), file=sys.stderr)
+        return exc.exit_code
+    except ImportError:
+        print(json.dumps(CookieSyncError("DEPENDENCY_MISSING").record()), file=sys.stderr)
+        return 1
+    except OSError:
+        print(json.dumps(CookieSyncError("LOCAL_UNAVAILABLE").record()), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print(json.dumps(CookieSyncError("LOCAL_UNAVAILABLE").record()), file=sys.stderr)
+        return 130
     except Exception:
-        pass
-
-
-async def process_request(connection, request):
-    if request.path == "/ping":
-        return connection.respond(200, "ok")
-
-
-async def oneshot_server(domain=None, action="getCookies"):
-    global ext_connection, got_response
-
-    print("[cookie-sync] Starting temporary server, waiting for extension...", file=sys.stderr)
-
-    async with serve(handle_connection, HOST, PORT, process_request=process_request):
-        for _ in range(EXT_WAIT_TIMEOUT):
-            if ext_connection is not None:
-                break
-            await asyncio.sleep(1)
-
-        if ext_connection is None:
-            print(f"[cookie-sync] Timeout: extension did not connect within {EXT_WAIT_TIMEOUT}s", file=sys.stderr)
-            return None
-
-        await ext_connection.send(json.dumps(build_request(action, domain)))
-
-        for _ in range(15):
-            if got_response is not None:
-                return got_response
-            await asyncio.sleep(1)
-
-        print("[cookie-sync] Timeout: no response from extension", file=sys.stderr)
-        return None
-
-
-def format_cookies(data):
-    if not data.get("ok"):
-        return None, data.get("error", "Unknown error")
-    return "; ".join(f'{c["name"]}={c["value"]}' for c in data["data"]), None
-
-
-def main():
-    args = sys.argv[1:]
-    list_mode = "--list" in args
-    domain = [a for a in args if not a.startswith("--")]
-
-    if list_mode:
-        result = (fetch_via_running_daemon(action="listAllowed") if ping_daemon()
-                  else asyncio.run(oneshot_server(action="listAllowed")))
-        if result and result.get("ok"):
-            for d in result["data"]:
-                print(d)
-        else:
-            print(f"Error: {result.get('error') if result else 'no response'}", file=sys.stderr)
-            sys.exit(1)
-        return
-
-    if not domain:
-        print("Usage: python cookie_sync_daemon.py <domain>", file=sys.stderr)
-        print("       python cookie_sync_daemon.py --list", file=sys.stderr)
-        sys.exit(1)
-
-    domain = domain[0]
-    result = (fetch_via_running_daemon(domain) if ping_daemon()
-              else asyncio.run(oneshot_server(domain)))
-
-    if result is None:
-        sys.exit(1)
-
-    if not result.get("ok"):
-        print(f"Error: {result.get('error')}", file=sys.stderr)
-        sys.exit(1)
-
-    header, err = format_cookies(result)
-    if err:
-        print(f"Error: {err}", file=sys.stderr)
-        sys.exit(1)
-
-    print(header)
+        print(json.dumps(CookieSyncError("INTERNAL_ERROR").record()), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

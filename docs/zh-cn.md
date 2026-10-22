@@ -1,125 +1,75 @@
 # Cookie Sync
 
-通过 Chrome 扩展 + 本地守护进程，在命令行中获取浏览器指定域名的 Cookie。
-
-## 架构
-
-```
-Chrome 扩展  ←──WebSocket (localhost:38247)──→  cookie_sync_daemon.py
-   │                                                  │
-   ├─ 域名管理（本地获取 + 云端同步）                    ├─ CLI 输出
-   ├─ Cookie 捕获与过滤                                └─ Cookie Header
-   ├─ 云同步（Gist/WebDAV + AES-256-GCM）
-   └─ Popup UI
-```
+通过 Chrome 扩展在命令行读取浏览器 Cookie。每次命令临时监听，获取一次后退出，不保存 Cookie，也不留下后台服务。
 
 ## 快速开始
 
-### 1. 安装 Chrome 扩展
-
-1. 打开 `chrome://extensions/`，开启开发者模式
-2. 点击「加载已解压的扩展程序」，选择 `cookie-sync-extension/` 目录
-3. 点击扩展图标，添加目标域名（每个域名可独立控制本地获取和云端同步）
-
-### 2. 使用 Claude Skill
-
-在 Claude Code 中，通过 cookie-sync skill 直接获取 Cookie：
+需要 Chrome 和 Python 3.11 或更高版本。安装 Python 依赖：
 
 ```bash
-# Cookie Header 格式（适合 curl）
-python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
-
-# 查看白名单
-python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
+python3 -m pip install websockets==17.2
 ```
 
-### 3. 配合 curl 使用
+1. 打开 `chrome://extensions/`，开启「开发者模式」。
+2. 点击「加载已解压的扩展程序」，选择 `cookie-sync-extension/`。
+3. 打开扩展弹窗，添加目标域名并开启「本地ON」。
+
+以下命令从仓库根目录运行：
 
 ```bash
-curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com)" \
-  https://api.example.com/me
+# 按完整 URL 匹配 Cookie，包括协议和路径
+python3 skills/cookie-sync/scripts/cookie_sync_daemon.py --url 'https://api.example.com/private/me'
+
+# 按域名查询
+python3 skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
 ```
 
-## 目录结构
+输出为一条 JSONL：`{"cookie_header":"sid=value; token=value"}`。Header 已拼好，用 jq 提取后即可交给 curl：
 
-```
-├── cookie-sync-extension/   # Chrome 扩展（Manifest V3）
-│   ├── background/           # Service Worker
-│   │   ├── main.js           # 入口
-│   │   ├── connection.js     # WebSocket 连接管理
-│   │   ├── cookie-ops.js     # Cookie 操作
-│   │   ├── domain-utils.js   # 域名工具
-│   │   ├── whitelist.js      # 统一域名管理（localAccess + cloudSync）
-│   │   └── cloud/            # 云同步模块
-│   │       ├── sync-engine.js  # 同步编排引擎
-│   │       ├── crypto.js       # AES-256-GCM 加密
-│   │       ├── config.js       # 配置管理
-│   │       ├── storage-adapter.js  # 存储接口
-│   │       ├── gist-adapter.js     # GitHub Gist 后端
-│   │       ├── webdav-adapter.js   # WebDAV 后端
-│   │       ├── data-collector.js   # Cookie + localStorage 收集器
-│   │       └── conflict.js        # 冲突解决
-│   ├── popup/                # 弹出窗口 UI
-│   │   ├── popup.html        # Tab 切换布局
-│   │   ├── popup.js          # Tab 路由 + 域名管理
-│   │   ├── cloud-tab.js      # 云同步 Tab
-│   │   └── cloud-tab.css     # 云同步样式
-│   ├── icons/                # 扩展图标
-│   └── manifest.json
-│
-└── skills/cookie-sync/       # Claude Code Skill
-    ├── SKILL.md              # Skill 定义
-    ├── agents/
-    │   └── openai.yaml       # Agent 配置
-    └── scripts/
-        └── cookie_sync_daemon.py  # 守护进程
+```bash
+set -o pipefail
+COOKIE=$(python3 skills/cookie-sync/scripts/cookie_sync_daemon.py --url 'https://api.example.com/me' | jq -er '.cookie_header') || exit $?
+curl -H "Cookie: $COOKIE" 'https://api.example.com/me'
+unset COOKIE
 ```
 
-## 云同步
+先检查退出状态再调用下游；获取到 Cookie 不代表目标服务已接受认证。
 
-通过 GitHub Gist 或 WebDAV 实现加密的跨设备 Cookie 同步。
+用于 AI Agent 时，将 `skills/cookie-sync/` 复制到其 Skill 目录。脚本与扩展应一起更新。
 
-### 配置步骤
+## 域名开关
 
-1. 打开扩展弹窗，切换到 **☁️ 云同步** Tab
-2. 配置加密密钥（推荐自动生成）
-3. 选择存储后端并配置：
-   - **GitHub Gist**：填入 GitHub Token（见下方说明）
-   - **WebDAV**：填入服务器地址、用户名和密码
-4. 点击 **保存配置** 激活
+每个域名有两个开关：
 
-### 多设备同步
+- **本地ON/OFF**：是否允许本地获取 Cookie。
+- **云端ON/OFF**：是否参与云端同步。
 
-在设备 A 首次推送后，状态卡片会显示 **Gist ID**。在设备 B 上填入相同的 Token 和该 Gist ID，即可同步同一份数据。
+最具体的域名配置优先；未配置的子域继承父域设置。有完整 URL 时使用 `--url`，会返回匹配该 URL 的 Cookie，包括匹配的父域 Cookie。域名查询则按 Cookie 所属域的本地设置过滤。
 
-### 域名管理
+## 常见问题
 
-每个域名有两个独立的控制维度：
-- **本地获取**（本地ON/OFF）：是否允许本地 daemon 获取该域名的 Cookie
-- **云端同步**（云端ON/OFF）：该域名的 Cookie 是否参与云端同步
+错误以 JSONL 输出到 stderr，stdout 留空。用 `--help` 查看纯文本选项，或加 `-v` 在 stderr 查看 JSONL 连接进度。
 
-从云端拉取时，新发现的域名会以"待确认"状态出现，需用户确认后才参与同步。
+| 错误 | 处理方式 |
+| --- | --- |
+| `DOMAIN_NOT_ALLOWED` | 在扩展中开启目标域名「本地ON」。 |
+| `COOKIE_EMPTY` | 核对请求 URL 或域名，没有匹配的 Cookie。 |
+| `EXTENSION_UNAVAILABLE` | 打开 Chrome 并启用扩展；冷启动连接可能需要等待。 |
+| `LOCAL_UNAVAILABLE` | 按顺序运行获取命令；本地 38247 端口可能已被占用。 |
+| `PROTOCOL_MISMATCH` | 同时更新脚本与扩展。 |
 
-### GitHub Token 权限
+默认总超时 85 秒，可用 `--timeout <秒数>` 调整（大于 0，最多 300 秒）。诊断不会输出 Cookie 值，使用时也应避免将其写入日志。
 
-在 https://github.com/settings/tokens 创建 Personal Access Token (classic) 时，只需勾选一个权限：
+## 可选：云同步
 
-| 权限 | 是否必须 | 用途 |
-|------|----------|------|
-| `gist` | **是** | 创建、读取和更新 Gist |
+通过 GitHub Gist 或 WebDAV 跨设备同步加密 Cookie：
 
-不需要其他任何权限。Token 只需要 Gist 访问权限——不需要你的仓库、Issues 或其他 GitHub 资源的访问权限。
+1. 打开扩展的「☁️ 云同步」页签，配置加密密钥。
+2. 选择存储后端：
+   - **GitHub Gist**：填写具有 `gist` 权限的 [个人访问令牌](https://github.com/settings/tokens)。首次使用可留空 Gist ID，推送时自动创建。
+   - **WebDAV**：填写服务器地址、凭据和文件路径。
+3. 保存配置，开启需要同步的域名，选择推送、拉取或双向同步，也可开启定时同步。
 
-## 依赖
+在另一台设备上，**导入同一加密密钥**。Gist 使用相同 Token 和首次推送后显示的 Gist ID；WebDAV 使用相同服务器和文件路径。新发现的域名会显示为待确认，供用户检查。
 
-- Chrome 浏览器
-- Python 3 + `websockets`（`pip install websockets`）
-
-## 安全
-
-- 仅读取/写入已启用对应权限的域名 Cookie
-- WebSocket 仅监听 localhost
-- 浏览器权限安装时一次性授予（`<all_urls>`），实际访问由每个域名的独立设置控制
-- 云同步使用 AES-256-GCM 加密，每次上传随机 IV
-- 加密密钥仅存储在本地（chrome.storage.local，不会通过 Chrome Sync 同步）
-- GitHub Token 仅需 `gist` 权限，无法访问你的仓库
+云端数据使用 AES-256-GCM 加密。密钥保存在扩展本地存储中，可从密钥管理中导出，供其他设备导入；请妥善保存。

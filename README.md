@@ -2,124 +2,76 @@
 
 [中文文档](docs/zh-cn.md)
 
-Retrieve browser cookies from the command line via a Chrome extension + local daemon.
+Read browser cookies from the command line through a Chrome extension. Each command starts a temporary local listener, fetches once, and exits without saving cookies or leaving a background service.
 
-## Architecture
+## Quick start
 
-```
-Chrome Extension  ←──WebSocket (localhost:38247)──→  cookie_sync_daemon.py
-   │                                                     │
-   ├─ Domain management (local + cloud)                   ├─ CLI output
-   ├─ Cookie capture & filtering                          └─ Cookie Header
-   ├─ Cloud sync (Gist/WebDAV + AES-256-GCM)
-   └─ Popup UI
-```
-
-## Quick Start
-
-### 1. Install Chrome Extension
-
-1. Open `chrome://extensions/` and enable Developer Mode
-2. Click "Load unpacked" and select the `cookie-sync-extension/` directory
-3. Click the extension icon and add target domains (each domain can independently control local daemon access and cloud sync)
-
-### 2. Use with Claude Code
+You need Chrome and Python 3.11 or later. Install the Python dependency:
 
 ```bash
-# Cookie Header format (for curl)
-python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
-
-# List whitelisted domains
-python skills/cookie-sync/scripts/cookie_sync_daemon.py --list
+python3 -m pip install websockets==17.2
 ```
 
-### 3. Use with curl
+1. Open `chrome://extensions/` and enable **Developer mode**.
+2. Click **Load unpacked** and select `cookie-sync-extension/`.
+3. Open the extension popup, add your target domain, and enable **本地ON** (local access).
+
+Run these commands from the repository root:
 
 ```bash
-curl -H "Cookie: $(python skills/cookie-sync/scripts/cookie_sync_daemon.py example.com)" \
-  https://api.example.com/me
+# Match cookies for a specific URL, including its protocol and path
+python3 skills/cookie-sync/scripts/cookie_sync_daemon.py --url 'https://api.example.com/private/me'
+
+# Query a domain
+python3 skills/cookie-sync/scripts/cookie_sync_daemon.py example.com
 ```
 
-## Directory Structure
+Output is one JSONL record: `{"cookie_header":"sid=value; token=value"}`. Extract the ready-to-use Cookie Header with jq and pass it to curl:
 
-```
-├── cookie-sync-extension/   # Chrome Extension (Manifest V3)
-│   ├── background/           # Service Worker
-│   │   ├── main.js           # Entry point
-│   │   ├── connection.js     # WebSocket connection
-│   │   ├── cookie-ops.js     # Cookie operations
-│   │   ├── domain-utils.js   # Domain utilities
-│   │   ├── whitelist.js      # Unified domain management (localAccess + cloudSync)
-│   │   └── cloud/            # Cloud sync modules
-│   │       ├── sync-engine.js  # Sync orchestration
-│   │       ├── crypto.js       # AES-256-GCM encryption
-│   │       ├── config.js       # Configuration management
-│   │       ├── storage-adapter.js  # Storage interface
-│   │       ├── gist-adapter.js     # GitHub Gist backend
-│   │       ├── webdav-adapter.js   # WebDAV backend
-│   │       ├── data-collector.js   # Cookie + localStorage collector
-│   │       └── conflict.js        # Conflict resolution
-│   ├── popup/                # Popup UI
-│   │   ├── popup.html        # Tab-based layout
-│   │   ├── popup.js          # Tab routing + domain management
-│   │   ├── cloud-tab.js      # Cloud sync tab
-│   │   └── cloud-tab.css     # Cloud sync styles
-│   ├── icons/                # Extension icons
-│   └── manifest.json
-│
-└── skills/cookie-sync/       # Claude Code Skill
-    ├── SKILL.md              # Skill definition
-    ├── agents/
-    │   └── openai.yaml       # Agent config
-    └── scripts/
-        └── cookie_sync_daemon.py  # Daemon script
+```bash
+set -o pipefail
+COOKIE=$(python3 skills/cookie-sync/scripts/cookie_sync_daemon.py --url 'https://api.example.com/me' | jq -er '.cookie_header') || exit $?
+curl -H "Cookie: $COOKIE" 'https://api.example.com/me'
+unset COOKIE
 ```
 
-## Cloud Sync
+Check the command's exit status before using the result; retrieving cookies does not guarantee that the target service accepts them.
 
-Encrypted cross-device cookie sync via GitHub Gist or WebDAV.
+For an AI agent, copy `skills/cookie-sync/` to its Skill directory. Keep the script and extension updated together.
 
-### Setup
+## Domain access
 
-1. Open the extension popup and switch to the **☁️ Cloud Sync** tab
-2. Configure encryption key (auto-generate recommended)
-3. Choose storage backend and configure:
-   - **GitHub Gist**: Enter a GitHub Token (see below)
-   - **WebDAV**: Enter server URL, username, and password
-4. Click **Save** to activate
+Each domain has two controls:
 
-### Multi-device Sync
+- **本地ON/OFF**: allow local cookie retrieval.
+- **云端ON/OFF**: include cookies in cloud sync.
 
-After first push on device A, the status card shows the **Gist ID**. On device B, enter the same Token + that Gist ID to sync to the same data.
+The most specific domain setting wins; unconfigured subdomains inherit their parent's setting. When you have a full URL, use `--url`: it returns cookies matching that URL, including matching parent-domain cookies. Domain queries filter cookies by their owning domains' local settings.
 
-### Domain Management
+## Troubleshooting
 
-Each domain has two independent controls:
-- **Local Access** (本地ON/OFF): Whether the local daemon can retrieve cookies for this domain
-- **Cloud Sync** (云端ON/OFF): Whether this domain's cookies participate in cloud sync
+Errors are reported as JSONL on stderr, with empty stdout. Use `--help` for plain-text options or `-v` for JSONL connection progress on stderr.
 
-When pulling from cloud, newly discovered domains appear as "Pending" and require user confirmation before syncing.
+| Error | Action |
+| --- | --- |
+| `DOMAIN_NOT_ALLOWED` | Enable **本地ON** for the target domain. |
+| `COOKIE_EMPTY` | Check the requested URL or domain; no cookies matched. |
+| `EXTENSION_UNAVAILABLE` | Open Chrome and enable the extension. Cold connections may take a while. |
+| `LOCAL_UNAVAILABLE` | Run one retrieval at a time; local port 38247 may already be in use. |
+| `PROTOCOL_MISMATCH` | Update the script and extension together. |
 
-### GitHub Token Permissions
+The total timeout defaults to 85 seconds. Override it with `--timeout <seconds>` (greater than 0, at most 300). Cookies are not printed in diagnostics; avoid saving their values in logs.
 
-When creating a Personal Access Token (classic) at https://github.com/settings/tokens, only one scope is required:
+## Optional cloud sync
 
-| Scope | Required | Purpose |
-|-------|----------|---------|
-| `gist` | **Yes** | Create, read, and update gists |
+Sync encrypted cookies across devices using GitHub Gist or WebDAV:
 
-No other scopes are needed. The token only needs gist access — it does not need access to your repos, issues, or any other GitHub resources.
+1. Open the extension's **☁️ Cloud Sync** tab and configure an encryption key.
+2. Choose a storage backend:
+   - **GitHub Gist**: enter a [personal access token](https://github.com/settings/tokens) with the `gist` scope. Leave Gist ID empty to create one on first push.
+   - **WebDAV**: enter the server URL, credentials, and file path.
+3. Save the configuration, enable the domains you want to sync, and choose push, pull, or bidirectional sync. Scheduled sync is optional.
 
-## Dependencies
+On another device, **import the same encryption key**. For Gist, use the same Token and Gist ID shown after the first push; for WebDAV, use the same server and file path. Newly discovered domains appear as pending for review.
 
-- Chrome browser
-- Python 3 + `websockets` (`pip install websockets`)
-
-## Security
-
-- Only reads/writes cookies for domains with respective access enabled
-- WebSocket listens on localhost only
-- Browser permission granted at install (`<all_urls>`), actual access controlled by per-domain settings
-- Cloud sync uses AES-256-GCM encryption with random IV per upload
-- Encryption key stored locally only (chrome.storage.local, not synced by Chrome)
-- GitHub Token only needs `gist` scope, no repo access required
+Cloud data uses AES-256-GCM encryption. The encryption key stays in local extension storage; export it from key management and keep it somewhere safe for your other devices.

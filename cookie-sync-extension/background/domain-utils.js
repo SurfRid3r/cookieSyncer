@@ -1,11 +1,14 @@
 export function normalizeDomain(input) {
   if (!input || typeof input !== "string") return "";
-  let d = input.trim().toLowerCase();
-  d = d.replace(/^https?:\/\//, "");
-  d = d.split("/")[0];
-  d = d.split(":")[0];
-  d = d.replace(/^[\.*]+/, "");
-  return d;
+  const value = input.trim().replace(/^[.*]+/, "");
+  if (!value) return "";
+  try {
+    const url = new URL(value.includes("://") ? value : `http://${value}`);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "";
+    return url.hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return "";
+  }
 }
 
 export function getOriginPatterns(domain) {

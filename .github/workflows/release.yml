@@ -6,7 +6,12 @@ on:
       - 'v*'
 
 jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
   release:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: write
